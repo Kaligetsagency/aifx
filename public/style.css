@@ -3,170 +3,214 @@
 
 body {
     font-family: 'Roboto', sans-serif;
-        background-color: #f0f2f5;
-            color: #333;
-                margin: 0;
-                    padding: 20px;
-                        display: flex;
-                            justify-content: center;
-                                align-items: flex-start;
-                                    min-height: 100vh;
-                                    }
+    background-color: #f0f2f5;
+    color: #333;
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+}
 
-                                    .container {
-                                        width: 100%;
-                                            max-width: 600px;
-                                                background-color: #ffffff;
-                                                    padding: 30px;
-                                                        border-radius: 12px;
-                                                            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-                                                            }
+.container {
+    width: 100%;
+    max-width: 600px;
+    background-color: #ffffff;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
 
-                                                            header {
-                                                                text-align: center;
-                                                                    margin-bottom: 30px;
-                                                                        border-bottom: 1px solid #e0e0e0;
-                                                                            padding-bottom: 20px;
-                                                                            }
+header {
+    text-align: center;
+    margin-bottom: 30px;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 20px;
+}
 
-                                                                            header h1 {
-                                                                                margin: 0;
-                                                                                    font-size: 2rem;
-                                                                                        font-weight: 700;
-                                                                                            color: #1a237e;
-                                                                                            }
+header h1 {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1a237e;
+}
 
-                                                                                            header p {
-                                                                                                margin-top: 8px;
-                                                                                                    color: #555;
-                                                                                                        font-size: 1rem;
-                                                                                                        }
+header p {
+    margin-top: 8px;
+    color: #555;
+    font-size: 1rem;
+}
 
-                                                                                                        .controls {
-                                                                                                            display: flex;
-                                                                                                                flex-direction: column;
-                                                                                                                    gap: 20px;
-                                                                                                                        margin-bottom: 30px;
-                                                                                                                        }
+.controls {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin-bottom: 30px;
+}
 
-                                                                                                                        .select-group {
-                                                                                                                            display: flex;
-                                                                                                                                flex-direction: column;
-                                                                                                                                }
+.select-group {
+    display: flex;
+    flex-direction: column;
+}
 
-                                                                                                                                .select-group label {
-                                                                                                                                    margin-bottom: 8px;
-                                                                                                                                        font-weight: 500;
-                                                                                                                                            color: #333;
-                                                                                                                                            }
+.select-group label {
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #333;
+}
 
-                                                                                                                                            select {
-                                                                                                                                                width: 100%;
-                                                                                                                                                    padding: 12px;
-                                                                                                                                                        border: 1px solid #ccc;
-                                                                                                                                                            border-radius: 8px;
-                                                                                                                                                                background-color: #f9f9f9;
-                                                                                                                                                                    font-size: 1rem;
-                                                                                                                                                                        transition: border-color 0.3s;
-                                                                                                                                                                        }
+select {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+    font-size: 1rem;
+    transition: border-color 0.3s;
+}
 
-                                                                                                                                                                        select:focus {
-                                                                                                                                                                            outline: none;
-                                                                                                                                                                                border-color: #1a237e;
-                                                                                                                                                                                    box-shadow: 0 0 0 2px rgba(26, 35, 126, 0.2);
-                                                                                                                                                                                    }
+select:focus {
+    outline: none;
+    border-color: #1a237e;
+    box-shadow: 0 0 0 2px rgba(26, 35, 126, 0.2);
+}
 
-                                                                                                                                                                                    button {
-                                                                                                                                                                                        padding: 14px 20px;
-                                                                                                                                                                                            border: none;
-                                                                                                                                                                                                border-radius: 8px;
-                                                                                                                                                                                                    background-color: #1a237e;
-                                                                                                                                                                                                        color: white;
-                                                                                                                                                                                                            font-size: 1rem;
-                                                                                                                                                                                                                font-weight: 500;
-                                                                                                                                                                                                                    cursor: pointer;
-                                                                                                                                                                                                                        transition: background-color 0.3s, transform 0.2s;
-                                                                                                                                                                                                                        }
+button {
+    padding: 14px 20px;
+    border: none;
+    border-radius: 8px;
+    background-color: #1a237e;
+    color: white;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.3s, transform 0.2s;
+}
 
-                                                                                                                                                                                                                        button:hover {
-                                                                                                                                                                                                                            background-color: #283593;
-                                                                                                                                                                                                                                transform: translateY(-2px);
-                                                                                                                                                                                                                                }
+button:hover {
+    background-color: #283593;
+    transform: translateY(-2px);
+}
 
-                                                                                                                                                                                                                                button:active {
-                                                                                                                                                                                                                                    transform: translateY(0);
-                                                                                                                                                                                                                                    }
+button:active {
+    transform: translateY(0);
+}
 
-                                                                                                                                                                                                                                    #results-container {
-                                                                                                                                                                                                                                        background-color: #f9f9f9;
-                                                                                                                                                                                                                                            padding: 20px;
-                                                                                                                                                                                                                                                border-radius: 8px;
-                                                                                                                                                                                                                                                    border: 1px solid #e0e0e0;
-                                                                                                                                                                                                                                                    }
+#results-container {
+    background-color: #f9f9f9;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+}
 
-                                                                                                                                                                                                                                                    #results-container.results-hidden {
-                                                                                                                                                                                                                                                        display: none;
-                                                                                                                                                                                                                                                        }
+#results-container.results-hidden {
+    display: none;
+}
 
-                                                                                                                                                                                                                                                        #results-container h2 {
-                                                                                                                                                                                                                                                            margin-top: 0;
-                                                                                                                                                                                                                                                                text-align: center;
-                                                                                                                                                                                                                                                                    color: #1a237e;
-                                                                                                                                                                                                                                                                        font-size: 1.5rem;
-                                                                                                                                                                                                                                                                            margin-bottom: 20px;
-                                                                                                                                                                                                                                                                            }
+#results-container h2 {
+    margin-top: 0;
+    text-align: center;
+    color: #1a237e;
+    font-size: 1.5rem;
+    margin-bottom: 20px;
+}
 
-                                                                                                                                                                                                                                                                            .result-item {
-                                                                                                                                                                                                                                                                                padding: 12px 0;
-                                                                                                                                                                                                                                                                                    border-bottom: 1px solid #e0e0e0;
-                                                                                                                                                                                                                                                                                        font-size: 1.1rem;
-                                                                                                                                                                                                                                                                                        }
+.result-item {
+    padding: 12px 0;
+    border-bottom: 1px solid #e0e0e0;
+    font-size: 1.1rem;
+}
 
-                                                                                                                                                                                                                                                                                        .result-item:last-child {
-                                                                                                                                                                                                                                                                                            border-bottom: none;
-                                                                                                                                                                                                                                                                                            }
+.result-item:last-child {
+    border-bottom: none;
+}
 
-                                                                                                                                                                                                                                                                                            .result-item strong {
-                                                                                                                                                                                                                                                                                                color: #333;
-                                                                                                                                                                                                                                                                                                    margin-right: 10px;
-                                                                                                                                                                                                                                                                                                    }
+.result-item strong {
+    color: #333;
+    margin-right: 10px;
+}
 
-                                                                                                                                                                                                                                                                                                    .result-item span {
-                                                                                                                                                                                                                                                                                                        color: #00695c;
-                                                                                                                                                                                                                                                                                                            font-weight: 500;
-                                                                                                                                                                                                                                                                                                            }
+.result-item span {
+    color: #00695c;
+    font-weight: 500;
+}
 
-                                                                                                                                                                                                                                                                                                            /* Loader styles */
-                                                                                                                                                                                                                                                                                                            .loader-hidden {
-                                                                                                                                                                                                                                                                                                                display: none;
-                                                                                                                                                                                                                                                                                                                }
+/* Loader styles */
+.loader-hidden {
+    display: none;
+}
 
-                                                                                                                                                                                                                                                                                                                #loader {
-                                                                                                                                                                                                                                                                                                                    border: 4px solid #f3f3f3;
-                                                                                                                                                                                                                                                                                                                        border-top: 4px solid #1a237e;
-                                                                                                                                                                                                                                                                                                                            border-radius: 50%;
-                                                                                                                                                                                                                                                                                                                                width: 40px;
-                                                                                                                                                                                                                                                                                                                                    height: 40px;
-                                                                                                                                                                                                                                                                                                                                        animation: spin 1s linear infinite;
-                                                                                                                                                                                                                                                                                                                                            margin: 20px auto;
-                                                                                                                                                                                                                                                                                                                                            }
+#loader {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #1a237e;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 20px auto;
+}
 
-                                                                                                                                                                                                                                                                                                                                            @keyframes spin {
-                                                                                                                                                                                                                                                                                                                                                0% { transform: rotate(0deg); }
-                                                                                                                                                                                                                                                                                                                                                    100% { transform: rotate(360deg); }
-                                                                                                                                                                                                                                                                                                                                                    }
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
 
-                                                                                                                                                                                                                                                                                                                                                    /* Error message styles */
-                                                                                                                                                                                                                                                                                                                                                    .error-hidden {
-                                                                                                                                                                                                                                                                                                                                                        display: none;
-                                                                                                                                                                                                                                                                                                                                                        }
+/* Error message styles */
+.error-hidden {
+    display: none;
+}
 
-                                                                                                                                                                                                                                                                                                                                                        #error-message {
-                                                                                                                                                                                                                                                                                                                                                            text-align: center;
-                                                                                                                                                                                                                                                                                                                                                                color: #d32f2f;
-                                                                                                                                                                                                                                                                                                                                                                    background-color: #ffebee;
-                                                                                                                                                                                                                                                                                                                                                                        padding: 15px;
-                                                                                                                                                                                                                                                                                                                                                                            border-radius: 8px;
-                                                                                                                                                                                                                                                                                                                                                                                margin-top: 20px;
-                                                                                                                                                                                                                                                                                                                                                                                }
-                                                                                                                                                                                                                                                                                                                                                                                
+#error-message {
+    text-align: center;
+    color: #d32f2f;
+    background-color: #ffebee;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+/* Custom Message Box Styles */
+.message-box {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: #fff;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    text-align: center;
+    min-width: 280px;
+    max-width: 90%;
+}
+
+.message-box p {
+    margin-bottom: 20px;
+    font-size: 1.1rem;
+    color: #333;
+}
+
+.message-box button {
+    padding: 10px 20px;
+    background-color: #1a237e;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background-color 0.3s;
+}
+
+.message-box button:hover {
+    background-color: #283593;
+}
+
+.message-box.error {
+    border: 2px solid #d32f2f;
+}
+
+.message-box.warning {
+    border: 2px solid #fbc02d;
+}
