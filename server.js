@@ -31,7 +31,7 @@ app.use(express.static('public'));
                                      ws.send(JSON.stringify({
                                                      "ticks_history": asset,
                                                                      "end": "latest",
-                                                                                     "count": 500,
+                                                                                     "count": 10500,
                                                                                                      "style": "candles",
                                                                                                                      "granularity": getTimeframeInSeconds(timeframe)
                                                                                                                                  }));
