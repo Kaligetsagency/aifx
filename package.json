@@ -1,5 +1,5 @@
 {
-      "name": "trading-analysis-app",
+      "name": "aifx",
         "version": "1.0.0",
           "description": "A Node.js application for trading analysis using Deriv and DeepSeek APIs.",
             "main": "server.js",
