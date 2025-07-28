@@ -21,6 +21,7 @@ const finnhubClient = new finnhub.DefaultApi();
 // Setup Google Gemini API
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// *** IMPORTANT FIX: Using 'gemini-2.5-flash' for broader compatibility ***
 const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 
@@ -163,19 +164,28 @@ app.post('/api/analyze', async (req, res) => {
 
         // 4. Call Gemini AI
         const aiResult = await model.generateContent(prompt);
+
+        // *** DEBUGGING LOGS ***
+        console.log('Full AI Result:', JSON.stringify(aiResult, null, 2));
+
+
         // Validate AI response structure
-        if (!aiResult || !aiResult.candidates || !aiResult.candidates[0] || !aiResult.candidates[0].content || !aiResult.candidates[0].content.parts || !aiResult.candidates[0].content.parts[0] || !aiResult.candidates[0].content.parts[0].text) {
-             throw new Error('Invalid response structure from Gemini API.');
+        if (!aiResult || !aiResult.candidates || aiResult.candidates.length === 0 || !aiResult.candidates[0].content || !aiResult.candidates[0].content.parts || aiResult.candidates[0].content.parts.length === 0 || !aiResult.candidates[0].content.parts[0].text) {
+             throw new Error('Invalid or empty response structure from Gemini API. Check console for full AI result.');
         }
 
         const responseText = aiResult.candidates[0].content.parts[0].text;
+
+        // *** DEBUGGING LOGS ***
+        console.log('Extracted Response Text from AI:', responseText);
+
 
         // Extract JSON string from AI response, robustly handling potential markdown
         const jsonStartIndex = responseText.indexOf('{');
         const jsonEndIndex = responseText.lastIndexOf('}');
 
         if (jsonStartIndex === -1 || jsonEndIndex === -1) {
-            throw new Error('Could not find a valid JSON object in the AI response.');
+            throw new Error('Could not find a valid JSON object in the AI response text. Check console for AI text.');
         }
 
         const jsonString = responseText.substring(jsonStartIndex, jsonEndIndex + 1);
@@ -196,7 +206,6 @@ app.post('/api/analyze', async (req, res) => {
 
     } catch (error) {
         // This block catches any error from the 'try' block and sends a structured JSON error.
-        // This is the critical fix to prevent the "Unexpected token '<'"" error on the frontend.
         console.error('Analysis error:', error.stack);
         res.status(500).json({ error: error.message || 'An unknown error occurred during analysis.' });
     }
