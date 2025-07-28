@@ -33,23 +33,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // Function to fetch and populate assets
     async function fetchAndPopulateAssets() {
         try {
-            // Using a public endpoint for Deriv available assets
-            const response = await fetch('https://raw.githubusercontent.com/binary-com/asset-index/master/asset-index.json');
-            const data = await response.json();
-            const syntheticIndices = data.assets.filter(asset => asset.symbol.startsWith('R_'));
+            // *** IMPORTANT FIX: Fetching from your backend endpoint ***
+            const response = await fetch('/api/assets');
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Network response was not ok.');
+            }
+            const syntheticIndices = await response.json(); // Data is already filtered by backend
 
             assetSelect.innerHTML = '<option value="">Select Asset</option>'; // Default option
 
-            syntheticIndices.forEach(asset => {
-                const option = document.createElement('option');
-                option.value = asset.symbol;
-                option.textContent = asset.name;
-                assetSelect.appendChild(option);
-            });
+            if (syntheticIndices.length === 0) {
+                assetSelect.innerHTML += '<option value="">No assets found</option>';
+            } else {
+                syntheticIndices.forEach(asset => {
+                    const option = document.createElement('option');
+                    option.value = asset.symbol;
+                    option.textContent = asset.name;
+                    assetSelect.appendChild(option);
+                });
+            }
         } catch (error) {
             console.error('Failed to fetch assets:', error);
             assetSelect.innerHTML = '<option value="">Failed to load assets</option>';
-            showMessageBox('Failed to load assets. Please try refreshing the page.', 'error');
+            showMessageBox('Failed to load assets: ' + error.message, 'error');
         }
     }
 
