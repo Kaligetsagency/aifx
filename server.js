@@ -4,7 +4,7 @@
 const express = require('express');
 const WebSocket = require('ws');
 const dotenv = require('dotenv');
-const fetch = require('node-fetch');
+const fetch = require('node-fetch'); // Make sure node-fetch is compatible with your Node.js version (v2 for CommonJS)
 const finnhub = require('finnhub');
 const { SMA, RSI, MACD, BollingerBands } = require('technicalindicators');
 
@@ -17,13 +17,6 @@ const port = 3000;
 const api_key = finnhub.ApiClient.instance.authentications['api_key'];
 api_key.apiKey = process.env.FINNHUB_API_KEY;
 const finnhubClient = new finnhub.DefaultApi();
-
-// Setup Google Gemini API
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// *** IMPORTANT FIX: Using 'gemini-2.5-flash' for broader compatibility ***
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-
 
 // Middleware
 app.use(express.json());
@@ -47,130 +40,201 @@ function getTimeframeInSeconds(timeframe) {
 
 /**
  * Calculates a suite of technical indicators for the candle data.
- * @param {Array<Object>} candles - Array of OHLC candles.
- * @returns {Object} Object containing calculated indicators.
+ * @param {Array<Object>} candles - Array of candle objects.
+ * @returns {Object} An object containing candles and calculated indicators.
  */
 function calculateIndicators(candles) {
-    const closes = candles.map(c => c.close);
-    const highs = candles.map(c => c.high);
-    const lows = candles.map(c => c.low);
+    const closePrices = candles.map(c => c.close);
+    const highPrices = candles.map(c => c.high);
+    const lowPrices = candles.map(c => c.low);
 
-    // Ensure enough data for indicators
-    if (closes.length < 50) { // SMA(50) needs at least 50 data points
-        return { sma50: [], bollingerBands: [] };
+    // Ensure enough data for indicators to avoid errors if candles array is too small
+    const minDataPoints = 50; // For SMA(50)
+    if (closePrices.length < minDataPoints) {
+        console.warn(`Not enough candle data (${closePrices.length}) for all indicators. Minimum ${minDataPoints} required.`);
+        return {
+            sma50: [],
+            rsi: [],
+            macd: [],
+            bollingerBands: []
+        };
     }
 
-    const sma50 = SMA.calculate({ period: 50, values: closes });
+    const sma50 = SMA.calculate({ period: 50, values: closePrices });
+    const rsi = RSI.calculate({ period: 14, values: closePrices });
+    const macd = MACD.calculate({
+        values: closePrices,
+        fastPeriod: 12,
+        slowPeriod: 26,
+        signalPeriod: 9,
+        SimpleMAOscillator: false,
+        SimpleMASignal: false
+    });
+    const bollingerBands = BollingerBands.calculate({ period: 20, stdDev: 2, values: closePrices });
 
-    // Bollinger Bands calculation needs adjusted input if closes.length is small
-    let bollingerBands = [];
-    if (closes.length >= 20) { // Bollinger Bands typically use a 20-period SMA
-        bollingerBands = BollingerBands.calculate({ period: 20, values: closes, stdDev: 2 });
-    }
-
-    return { sma50, bollingerBands };
+    return {
+        sma50,
+        rsi,
+        macd,
+        bollingerBands
+    };
 }
 
+
 /**
- * Fetches historical candle data from the Deriv API.
- * @param {string} symbol - Trading asset symbol (e.g., 'R_100').
- * @param {number} timeframeSeconds - Granularity of candles in seconds.
- * @param {number} count - Number of candles to retrieve.
- * @returns {Promise<Array<Object>>} Array of candle data.
+ * Fetches historical candle data from Deriv API.
+ * @param {string} asset - The financial asset to fetch data for.
+ * @param {string} timeframe - The timeframe for the data.
+ * @returns {Promise<any>} A promise that resolves with the fetched candles data.
  */
-async function getCandleData(symbol, timeframeSeconds, count) {
+function getMarketData(asset, timeframe) {
     return new Promise((resolve, reject) => {
         const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
-
         ws.onopen = () => {
             ws.send(JSON.stringify({
-                ticks_history: symbol,
-                adjust_start_time: 1,
-                count: count,
-                end: 'latest',
-                start: 1,
-                style: 'candles',
-                granularity: timeframeSeconds
+                "ticks_history": asset,
+                "end": "latest",
+                "count": 500, // Request sufficient candles for indicators
+                "style": "candles",
+                "granularity": getTimeframeInSeconds(timeframe)
             }));
         };
-
         ws.onmessage = (msg) => {
             const data = JSON.parse(msg.data);
             if (data.error) {
                 reject(new Error(data.error.message));
+                ws.close();
             } else if (data.msg_type === 'candles') {
-                const candles = data.candles.map(c => ({
-                    epoch: parseInt(c.epoch), // Ensure time is a number
-                    open: parseFloat(c.open),
-                    high: parseFloat(c.high),
-                    low: parseFloat(c.low),
-                    close: parseFloat(c.close)
-                })).sort((a, b) => a.epoch - b.epoch); // Ensure chronological order
-                resolve(candles);
+                if (data.candles && data.candles.length > 0) {
+                    const candles = data.candles.map(c => ({
+                        epoch: parseInt(c.epoch),
+                        open: parseFloat(c.open),
+                        high: parseFloat(c.high),
+                        low: parseFloat(c.low),
+                        close: parseFloat(c.close)
+                    })).sort((a, b) => a.epoch - b.epoch); // Ensure chronological order
+                    resolve(candles);
+                } else {
+                    reject(new Error(`No candle data returned for ${asset}.`));
+                }
+                ws.close();
             }
-            ws.close();
         };
-
-        ws.onerror = (err) => {
-            reject(new Error(`WebSocket error fetching candle data: ${err.message}`));
-        };
-
+        ws.onerror = (err) => reject(new Error('WebSocket error: ' + err.message));
         ws.onclose = () => {
             console.log('Deriv WebSocket for candles closed.');
         };
     });
 }
 
+/**
+ * Fetches upcoming high-impact economic events from Finnhub.
+ * @returns {Promise<Array<Object>>} A promise that resolves with a list of events.
+ */
+function getEconomicEvents() {
+    return new Promise((resolve, reject) => {
+        const today = new Date().toISOString().split('T')[0];
+        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        finnhubClient.economicCalendar({ '_from': today, 'to': tomorrow }, (error, data, response) => {
+            if (error) {
+                console.error("Finnhub API Error:", error);
+                // Resolve with empty array instead of rejecting to allow main analysis to continue
+                // This prevents a full failure if only the news API is down.
+                resolve([]);
+            } else {
+                if (!data || !data.economicCalendar) {
+                    return resolve([]);
+                }
+                // Filter for high-impact events for major economies
+                const majorEconomies = ['US', 'EU', 'GB', 'JP', 'CN', 'DE'];
+                const highImpactEvents = data.economicCalendar.filter(e =>
+                    e.impact === 'high' && majorEconomies.includes(e.country)
+                ).map(e => ({ event: e.event, country: e.country, time: e.time })); // Keep it concise
+                resolve(highImpactEvents);
+            }
+        });
+    });
+}
 
-// API endpoint for analysis
+
+// API endpoint to analyze market data
 app.post('/api/analyze', async (req, res) => {
     const { asset, timeframe } = req.body;
-    const timeframeSeconds = getTimeframeInSeconds(timeframe);
-    const candleCount = 200; // Request enough candles for indicators (e.g., SMA 50 needs at least 50 candles)
-
     if (!asset || !timeframe) {
         return res.status(400).json({ error: 'Asset and timeframe are required.' });
     }
 
     try {
-        // 1. Fetch historical data
-        const candles = await getCandleData(asset, timeframeSeconds, candleCount);
-        if (candles.length === 0) {
-            return res.status(404).json({ error: 'No candle data found for the selected asset and timeframe.' });
+        const candles = await getMarketData(asset, timeframe);
+        
+        // Ensure enough candles for indicators before calculating
+        if (candles.length < 50) { // SMA(50) needs 50 data points
+            return res.status(400).json({ error: `Not enough historical data for ${asset} on ${timeframe}. Please try a different asset or timeframe.` });
         }
 
-        // 2. Calculate technical indicators
         const indicators = calculateIndicators(candles);
+        const upcomingEvents = await getEconomicEvents();
 
-        // 3. Prepare data for AI model
-        const latestCandle = candles[candles.length - 1];
-        const last50Closes = candles.slice(-50).map(c => c.close); // Last 50 closes for context
-        const prompt = `Given the following market data for ${asset} on a ${timeframe} timeframe:
-        Latest candle: Open=${latestCandle.open}, High=${latestCandle.high}, Low=${latestCandle.low}, Close=${latestCandle.close}.
-        Last 50 closing prices: ${last50Closes.join(', ')}.
-        SMA(50): ${indicators.sma50 ? indicators.sma50[indicators.sma50.length - 1] : 'N/A'}.
-        Bollinger Bands (last values): Upper=${indicators.bollingerBands && indicators.bollingerBands.length > 0 ? indicators.bollingerBands[indicators.bollingerBands.length - 1].upper : 'N/A'}, Middle=${indicators.bollingerBands && indicators.bollingerBands.length > 0 ? indicators.bollingerBands[indicators.bollingerBands.length - 1].middle : 'N/A'}, Lower=${indicators.bollingerBands && indicators.bollingerBands.length > 0 ? indicators.bollingerBands[indicators.bollingerBands.length - 1].lower : 'N/A'}.
+        const recentCandles = candles.slice(-50).map(c => ({ o: c.open, h: c.high, l: c.low, c: c.close, t: c.epoch }));
+        const recentIndicators = {
+            sma50: indicators.sma50.slice(-50),
+            rsi: indicators.rsi.slice(-50),
+            macd: indicators.macd.slice(-50),
+            bollingerBands: indicators.bollingerBands.slice(-50)
+        };
 
-        Based on this data, provide a concise trading analysis for the next immediate period.
-        Suggest a potential entry point, stop loss, and take profit level.
-        Also, provide a brief rationale for the suggestion.
-        Format your response as a JSON object with the following structure:
-        {
-            "entryPoint": "number",
-            "stopLoss": "number",
-            "takeProfit": "number",
-            "rationale": "string"
-        }`;
+        const prompt = `You are an expert trading strategist AI. Your task is to generate a precise trade recommendation for ${asset} on the ${timeframe} timeframe based on the provided market data.
 
-        // 4. Call Gemini AI
-        const aiResult = await model.generateContent(prompt);
+**Market Data:**
+1.  **Recent Candles:** ${JSON.stringify(recentCandles)}
+2.  **Technical Indicators:**
+    * **50-period SMA:** ${JSON.stringify(recentIndicators.sma50)}
+    * **14-period RSI:** ${JSON.stringify(recentIndicators.rsi)}
+    * **MACD (12,26,9):** ${JSON.stringify(recentIndicators.macd)}
+    * **Bollinger Bands (20,2):** ${JSON.stringify(recentIndicators.bollingerBands)}
+3.  **Upcoming High-Impact Events (Next 24h):** ${JSON.stringify(upcomingEvents)}
+
+**Analysis & Instructions:**
+1.  **Trend:** Identify the primary trend using the 50-SMA.
+2.  **Momentum:** Evaluate RSI for overbought/oversold conditions and MACD for crossovers.
+3.  **Volatility:** Analyze price action relative to the Bollinger Bands (e.g., breakouts, squeezes).
+4.  **Risk:** Assess if upcoming economic events pose a significant risk to the trade.
+5.  **Synthesize:** Based on the confluence of these factors, determine an optimal trade setup.
+
+**Output Format:**
+Return ONLY a single, minified JSON object with no markdown. The JSON object must have these four keys: "entryPoint", "stopLoss", "takeProfit", and "rationale". The rationale must be a concise, one-sentence explanation for the trade.`;
+
+        const apiKey = process.env.GEMINI_API_KEY;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`; // Using gemini-2.5-flash as per your logs
+
+        const aiResponse = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
+
+        if (!aiResponse.ok) {
+            const errorBody = await aiResponse.text();
+            throw new Error(`Gemini API request failed with status ${aiResponse.status}: ${errorBody}`);
+        }
+
+        const aiResult = await aiResponse.json();
 
         // *** DEBUGGING LOGS ***
         console.log('Full AI Result:', JSON.stringify(aiResult, null, 2));
 
 
-        // Validate AI response structure
-        if (!aiResult || !aiResult.candidates || aiResult.candidates.length === 0 || !aiResult.candidates[0].content || !aiResult.candidates[0].content.parts || aiResult.candidates[0].content.parts.length === 0 || !aiResult.candidates[0].content.parts[0].text) {
+        // *** ROBUST VALIDATION FIX ***
+        if (
+            !aiResult ||
+            !aiResult.candidates ||
+            aiResult.candidates.length === 0 || // Check if candidates array is empty
+            !aiResult.candidates[0].content ||
+            !aiResult.candidates[0].content.parts ||
+            aiResult.candidates[0].content.parts.length === 0 || // Check if parts array is empty
+            typeof aiResult.candidates[0].content.parts[0].text !== 'string' || // Check if text is a string
+            aiResult.candidates[0].content.parts[0].text.trim() === '' // Check if text is empty or just whitespace
+        ) {
              throw new Error('Invalid or empty response structure from Gemini API. Check console for full AI result.');
         }
 
@@ -199,13 +263,12 @@ app.post('/api/analyze', async (req, res) => {
                 candles: candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close })),
                 indicators: {
                     sma50: indicators.sma50,
-                    bollingerBands: indicators.bollingerBands
+                    bollingerBands: indicators.bollingerBands // Only including indicators displayed on chart
                 }
             }
         });
 
     } catch (error) {
-        // This block catches any error from the 'try' block and sends a structured JSON error.
         console.error('Analysis error:', error.stack);
         res.status(500).json({ error: error.message || 'An unknown error occurred during analysis.' });
     }
