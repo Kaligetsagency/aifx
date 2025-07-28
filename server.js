@@ -128,6 +128,45 @@ function getMarketData(asset, timeframe) {
 }
 
 /**
+ * Fetches active symbols (synthetic indices) from the Deriv API.
+ * @returns {Promise<Array<Object>>} A promise that resolves with a list of synthetic index assets.
+ */
+function getActiveSymbols() {
+    return new Promise((resolve, reject) => {
+        const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
+
+        ws.onopen = () => {
+            ws.send(JSON.stringify({ active_symbols: 'brief', product_type: 'multi_barrier' }));
+        };
+
+        ws.onmessage = (msg) => {
+            const data = JSON.parse(msg.data);
+            if (data.error) {
+                reject(new Error(data.error.message));
+            } else if (data.msg_type === 'active_symbols') {
+                const syntheticIndices = data.active_symbols.filter(symbol =>
+                    symbol.market === 'synthetic_index' && symbol.is_trading_suspended === 0
+                ).map(symbol => ({
+                    symbol: symbol.symbol,
+                    name: symbol.display_name
+                }));
+                resolve(syntheticIndices);
+            }
+            ws.close();
+        };
+
+        ws.onerror = (err) => {
+            reject(new Error(`WebSocket error fetching active symbols: ${err.message}`));
+        };
+
+        ws.onclose = () => {
+            console.log('Deriv WebSocket for active symbols closed.');
+        };
+    });
+}
+
+
+/**
  * Fetches upcoming high-impact economic events from Finnhub.
  * @returns {Promise<Array<Object>>} A promise that resolves with a list of events.
  */
@@ -155,6 +194,17 @@ function getEconomicEvents() {
         });
     });
 }
+
+// New API endpoint for active symbols
+app.get('/api/assets', async (req, res) => {
+    try {
+        const assets = await getActiveSymbols();
+        res.json(assets);
+    } catch (error) {
+        console.error('Error fetching assets from Deriv:', error);
+        res.status(500).json({ error: 'Failed to fetch assets from Deriv API.' });
+    }
+});
 
 
 // API endpoint to analyze market data
