@@ -45,8 +45,6 @@ function getTimeframeInSeconds(timeframe) {
  */
 function calculateIndicators(candles) {
     const closePrices = candles.map(c => c.close);
-    const highPrices = candles.map(c => c.high);
-    const lowPrices = candles.map(c => c.low);
 
     const sma50 = SMA.calculate({ period: 50, values: closePrices });
     const rsi = RSI.calculate({ period: 14, values: closePrices });
@@ -117,8 +115,12 @@ function getEconomicEvents() {
             if (error) {
                 console.error("Finnhub API Error:", error);
                 // Resolve with empty array instead of rejecting to allow main analysis to continue
+                // This prevents a full failure if only the news API is down.
                 resolve([]);
             } else {
+                if (!data || !data.economicCalendar) {
+                    return resolve([]);
+                }
                 // Filter for high-impact events for major economies
                 const majorEconomies = ['US', 'EU', 'GB', 'JP', 'CN', 'DE'];
                 const highImpactEvents = data.economicCalendar.filter(e =>
@@ -173,7 +175,7 @@ app.post('/api/analyze', async (req, res) => {
 Return ONLY a single, minified JSON object with no markdown. The JSON object must have these four keys: "entryPoint", "stopLoss", "takeProfit", and "rationale". The rationale must be a concise, one-sentence explanation for the trade.`;
 
         const apiKey = process.env.GEMINI_API_KEY;
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-latest:generateContent?key=${apiKey}`;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
         const aiResponse = await fetch(apiUrl, {
             method: 'POST',
@@ -182,14 +184,25 @@ Return ONLY a single, minified JSON object with no markdown. The JSON object mus
         });
 
         if (!aiResponse.ok) {
-            throw new Error(`Gemini API request failed with status ${aiResponse.status}`);
+            const errorBody = await aiResponse.text();
+            throw new Error(`Gemini API request failed: ${errorBody}`);
         }
 
         const aiResult = await aiResponse.json();
+
+        if (!aiResult.candidates || !aiResult.candidates[0].content.parts[0].text) {
+             throw new Error('Invalid response structure from Gemini API.');
+        }
+
         const responseText = aiResult.candidates[0].content.parts[0].text;
 
         const jsonStartIndex = responseText.indexOf('{');
         const jsonEndIndex = responseText.lastIndexOf('}');
+
+        if (jsonStartIndex === -1 || jsonEndIndex === -1) {
+            throw new Error('Could not find a valid JSON object in the AI response.');
+        }
+
         const jsonString = responseText.substring(jsonStartIndex, jsonEndIndex + 1);
 
         const analysis = JSON.parse(jsonString);
@@ -207,7 +220,9 @@ Return ONLY a single, minified JSON object with no markdown. The JSON object mus
         });
 
     } catch (error) {
-        console.error('Analysis error:', error);
+        // This block catches any error from the 'try' block and sends a structured JSON error.
+        // This is the critical fix to prevent the "Unexpected token '<'" error.
+        console.error('Analysis error:', error.stack);
         res.status(500).json({ error: error.message });
     }
 });
