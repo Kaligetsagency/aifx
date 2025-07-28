@@ -9,133 +9,170 @@ document.addEventListener('DOMContentLoaded', () => {
     const loader = document.getElementById('loader');
     const resultsContent = document.getElementById('results-content');
     const errorMessage = document.getElementById('error-message');
+    const chartContainer = document.getElementById('chart-container');
 
     const entryPointEl = document.getElementById('entry-point');
     const stopLossEl = document.getElementById('stop-loss');
     const takeProfitEl = document.getElementById('take-profit');
+    const rationaleEl = document.getElementById('rationale');
 
-    const derivSocket = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
+    let chart = null; // To hold the chart instance
 
-    // Function to show a custom message box instead of alert()
+    // Function to show a custom message box
     function showMessageBox(message, type = 'error') {
+        // Remove existing message boxes first
+        document.querySelectorAll('.message-box').forEach(box => box.remove());
+
         const messageBox = document.createElement('div');
         messageBox.className = `message-box ${type}`;
-        messageBox.innerHTML = `
-            <p>${message}</p>
-            <button class="message-box-close">OK</button>
-        `;
+        messageBox.innerHTML = `<p>${message}</p><button class="message-box-close">OK</button>`;
         document.body.appendChild(messageBox);
-
-        messageBox.querySelector('.message-box-close').addEventListener('click', () => {
-            messageBox.remove();
-        });
-
-        // Automatically remove after a few seconds for non-critical messages
-        if (type !== 'error') {
-            setTimeout(() => {
-                messageBox.remove();
-            }, 3000);
-        }
+        messageBox.querySelector('.message-box-close').addEventListener('click', () => messageBox.remove());
     }
 
-    // 1. Populate asset dropdown on page load
-    derivSocket.onopen = function(e) {
-        derivSocket.send(JSON.stringify({
-            active_symbols: "brief",
-            product_type: "basic"
-        }));
+    // 1. Populate asset dropdown
+    const derivSocket = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
+    derivSocket.onopen = () => {
+        derivSocket.send(JSON.stringify({ active_symbols: "brief", product_type: "basic" }));
     };
 
-    derivSocket.onmessage = function(msg) {
+    derivSocket.onmessage = (msg) => {
         const data = JSON.parse(msg.data);
-
         if (data.error) {
-            console.error('Deriv API error:', data.error.message);
-            assetSelect.innerHTML = `<option value="">Error loading assets</option>`;
             showMessageBox(`Failed to load assets: ${data.error.message}`, 'error');
             return;
         }
-
         if (data.active_symbols) {
-            const activeSymbols = data.active_symbols;
-            assetSelect.innerHTML = ''; // Clear loading message
+            const symbols = data.active_symbols.filter(s =>
+                s.market === 'forex' || s.market === 'indices' || s.market === 'synthetic_index'
+            ).sort((a, b) => a.display_name.localeCompare(b.display_name));
 
-            // Filter for forex and indices for this example, you can expand this
-            const filteredSymbols = activeSymbols.filter(s =>
-                s.market === 'forex' || s.market === 'indices' || s.market === 'synthetic_index' // Added synthetic indices
-            );
-
-            // Sort symbols alphabetically by display name
-            filteredSymbols.sort((a, b) => a.display_name.localeCompare(b.display_name));
-
-
-            filteredSymbols.forEach(symbol => {
+            assetSelect.innerHTML = '';
+            symbols.forEach(symbol => {
                 const option = document.createElement('option');
                 option.value = symbol.symbol;
                 option.textContent = symbol.display_name;
                 assetSelect.appendChild(option);
             });
-            derivSocket.close(); // Close connection after getting symbols
+            derivSocket.close();
         }
     };
+    derivSocket.onerror = () => showMessageBox('Failed to connect to Deriv WebSocket for assets.', 'error');
 
-    derivSocket.onerror = function(err) {
-        console.error('WebSocket Error:', err);
-        assetSelect.innerHTML = `<option value="">Failed to connect</option>`;
-        showMessageBox('Failed to connect to Deriv WebSocket for assets.', 'error');
-    };
 
-    // 2. Handle "Analyze" button click
+    // 2. Function to initialize and update the chart
+    function displayChartData(marketData) {
+        if (!marketData || !marketData.candles || marketData.candles.length === 0) {
+            chartContainer.innerHTML = 'Not enough data to display chart.';
+            return;
+        }
+
+        // Clear previous chart if it exists
+        if (chart) {
+            chart.remove();
+            chart = null;
+        }
+        chartContainer.innerHTML = ''; // Clear any error messages
+
+        chart = LightweightCharts.createChart(chartContainer, {
+            width: chartContainer.clientWidth,
+            height: 400,
+            layout: { backgroundColor: '#ffffff', textColor: '#333' },
+            grid: { vertLines: { color: '#f0f0f0' }, horzLines: { color: '#f0f0f0' } },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            rightPriceScale: { borderColor: '#cccccc' },
+            timeScale: { borderColor: '#cccccc' },
+        });
+
+        const candleSeries = chart.addCandlestickSeries({
+            upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
+            wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+        });
+        candleSeries.setData(marketData.candles);
+
+        // Add SMA Line
+        if (marketData.indicators.sma50) {
+            const smaLine = chart.addLineSeries({ color: 'rgba(5, 122, 255, 0.8)', lineWidth: 2 });
+            const smaData = marketData.candles
+                .map((candle, index) => ({
+                    time: candle.time,
+                    value: marketData.indicators.sma50[index]
+                }))
+                .filter(d => d.value); // Filter out null/undefined values
+            smaLine.setData(smaData);
+        }
+
+        // Add Bollinger Bands
+        if (marketData.indicators.bollingerBands) {
+            const bbUpper = chart.addLineSeries({ color: 'rgba(204, 102, 0, 0.5)', lineWidth: 1 });
+            const bbMiddle = chart.addLineSeries({ color: 'rgba(204, 102, 0, 0.5)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+            const bbLower = chart.addLineSeries({ color: 'rgba(204, 102, 0, 0.5)', lineWidth: 1 });
+
+            const bbData = marketData.candles
+                .map((candle, index) => ({
+                    time: candle.time,
+                    ...marketData.indicators.bollingerBands[index]
+                }))
+                .filter(d => d.upper);
+
+            bbUpper.setData(bbData.map(d => ({ time: d.time, value: d.upper })));
+            bbMiddle.setData(bbData.map(d => ({ time: d.time, value: d.middle })));
+            bbLower.setData(bbData.map(d => ({ time: d.time, value: d.lower })));
+        }
+
+        chart.timeScale().fitContent();
+    }
+
+
+    // 3. Handle "Analyze" button click
     analyzeBtn.addEventListener('click', async () => {
         const selectedAsset = assetSelect.value;
         const selectedTimeframe = timeframeSelect.value;
-
         if (!selectedAsset) {
             showMessageBox('Please select an asset before analyzing.', 'warning');
             return;
         }
 
-        // Show loader and hide previous results/errors
         resultsContainer.classList.remove('results-hidden');
         resultsContent.style.display = 'none';
         loader.classList.remove('loader-hidden');
         errorMessage.classList.add('error-hidden');
         errorMessage.textContent = '';
-
+        chartContainer.innerHTML = '';
 
         try {
             const response = await fetch('/api/analyze', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    asset: selectedAsset,
-                    timeframe: selectedTimeframe
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ asset: selectedAsset, timeframe: selectedTimeframe })
             });
-
             const result = await response.json();
+            if (!response.ok) throw new Error(result.error || `HTTP error! Status: ${response.status}`);
 
-            if (!response.ok) {
-                throw new Error(result.error || `HTTP error! Status: ${response.status}`);
-            }
+            // 4. Display results and chart
+            const analysis = result.analysis;
+            entryPointEl.textContent = analysis.entryPoint ? parseFloat(analysis.entryPoint).toFixed(4) : 'N/A';
+            stopLossEl.textContent = analysis.stopLoss ? parseFloat(analysis.stopLoss).toFixed(4) : 'N/A';
+            takeProfitEl.textContent = analysis.takeProfit ? parseFloat(analysis.takeProfit).toFixed(4) : 'N/A';
+            rationaleEl.textContent = analysis.rationale || 'No rationale provided.';
 
-            // 3. Display results
-            entryPointEl.textContent = result.entryPoint ? parseFloat(result.entryPoint).toFixed(4) : 'N/A';
-            stopLossEl.textContent = result.stopLoss ? parseFloat(result.stopLoss).toFixed(4) : 'N/A';
-            takeProfitEl.textContent = result.takeProfit ? parseFloat(result.takeProfit).toFixed(4) : 'N/A';
+            displayChartData(result.marketData);
 
-            // Hide loader and show content
             loader.classList.add('loader-hidden');
             resultsContent.style.display = 'block';
 
         } catch (error) {
             console.error('Analysis request failed:', error);
-            // Display error message
             errorMessage.textContent = `Analysis failed: ${error.message}`;
             errorMessage.classList.remove('error-hidden');
             loader.classList.add('loader-hidden');
+        }
+    });
+
+    // Resize chart with window
+    window.addEventListener('resize', () => {
+        if (chart) {
+            chart.applyOptions({ width: chartContainer.clientWidth });
         }
     });
 });
