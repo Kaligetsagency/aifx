@@ -175,7 +175,7 @@ app.post('/api/analyze', async (req, res) => {
 Return ONLY a single, minified JSON object with no markdown. The JSON object must have these four keys: "entryPoint", "stopLoss", "takeProfit", and "rationale". The rationale must be a concise, one-sentence explanation for the trade.`;
 
         const apiKey = process.env.GEMINI_API_KEY;
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-latest:generateContent?key=${apiKey}`;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
         const aiResponse = await fetch(apiUrl, {
             method: 'POST',
