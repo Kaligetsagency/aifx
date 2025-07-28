@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chartContainer = document.getElementById('chart-container');
 
     const entryPointEl = document.getElementById('entry-point');
-    const stopLossEl = document.getElementById('stop-loss');
+    const stopLossEl = document('stop-loss');
     const takeProfitEl = document.getElementById('take-profit');
     const rationaleEl = document.getElementById('rationale');
 
@@ -74,15 +74,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         chartContainer.innerHTML = ''; // Clear any error messages
 
+        // Ensure chart container has dimensions before creating the chart
+        const containerWidth = chartContainer.clientWidth;
+        const containerHeight = chartContainer.clientHeight;
+
+        if (containerWidth === 0 || containerHeight === 0) {
+            console.warn('Chart container has no dimensions. Deferring chart creation.');
+            chartContainer.innerHTML = 'Chart container not ready. Please try again.';
+            return;
+        }
+
         chart = LightweightCharts.createChart(chartContainer, {
-            width: chartContainer.clientWidth,
-            height: 400,
+            width: containerWidth,
+            height: containerHeight,
             layout: { backgroundColor: '#ffffff', textColor: '#333' },
             grid: { vertLines: { color: '#f0f0f0' }, horzLines: { color: '#f0f0f0' } },
             crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
             rightPriceScale: { borderColor: '#cccccc' },
             timeScale: { borderColor: '#cccccc' },
         });
+
+        // Check if chart was successfully created
+        if (!chart) {
+            console.error('Failed to create LightweightCharts instance.');
+            chartContainer.innerHTML = 'Failed to initialize chart. Please refresh.';
+            return;
+        }
 
         const candleSeries = chart.addCandlestickSeries({
             upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
@@ -98,7 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     time: candle.time,
                     value: marketData.indicators.sma50[index]
                 }))
-                .filter(d => d.value); // Filter out null/undefined values
+                .filter(d => typeof d.value === 'number'); // Filter out non-numeric values
             smaLine.setData(smaData);
         }
 
@@ -113,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     time: candle.time,
                     ...marketData.indicators.bollingerBands[index]
                 }))
-                .filter(d => d.upper);
+                .filter(d => typeof d.upper === 'number' && typeof d.middle === 'number' && typeof d.lower === 'number');
 
             bbUpper.setData(bbData.map(d => ({ time: d.time, value: d.upper })));
             bbMiddle.setData(bbData.map(d => ({ time: d.time, value: d.middle })));
@@ -138,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loader.classList.remove('loader-hidden');
         errorMessage.classList.add('error-hidden');
         errorMessage.textContent = '';
-        chartContainer.innerHTML = '';
+        chartContainer.innerHTML = ''; // Clear previous chart message/content
 
         try {
             const response = await fetch('/api/analyze', {
