@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chartContainer = document.getElementById('chart-container');
 
     const entryPointEl = document.getElementById('entry-point');
-    const stopLossEl = document('stop-loss');
+    const stopLossEl = document.getElementById('stop-loss');
     const takeProfitEl = document.getElementById('take-profit');
     const rationaleEl = document.getElementById('rationale');
 
@@ -31,33 +31,83 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 1. Populate asset dropdown
-    const derivSocket = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
-    derivSocket.onopen = () => {
-        derivSocket.send(JSON.stringify({ active_symbols: "brief", product_type: "basic" }));
-    };
+    // Encapsulate asset loading in a dedicated function for better control
+    async function loadAssets() {
+        assetSelect.innerHTML = '<option value="">Loading assets...</option>'; // Show loading state
+        assetSelect.disabled = true; // Disable until loaded
 
-    derivSocket.onmessage = (msg) => {
-        const data = JSON.parse(msg.data);
-        if (data.error) {
-            showMessageBox(`Failed to load assets: ${data.error.message}`, 'error');
-            return;
-        }
-        if (data.active_symbols) {
-            const symbols = data.active_symbols.filter(s =>
-                s.market === 'forex' || s.market === 'indices' || s.market === 'synthetic_index'
-            ).sort((a, b) => a.display_name.localeCompare(b.display_name));
+        return new Promise((resolve, reject) => {
+            const derivSocket = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
 
-            assetSelect.innerHTML = '';
-            symbols.forEach(symbol => {
-                const option = document.createElement('option');
-                option.value = symbol.symbol;
-                option.textContent = symbol.display_name;
-                assetSelect.appendChild(option);
-            });
-            derivSocket.close();
-        }
-    };
-    derivSocket.onerror = () => showMessageBox('Failed to connect to Deriv WebSocket for assets.', 'error');
+            derivSocket.onopen = () => {
+                derivSocket.send(JSON.stringify({ active_symbols: "brief", product_type: "basic" }));
+            };
+
+            derivSocket.onmessage = (msg) => {
+                const data = JSON.parse(msg.data);
+                if (data.error) {
+                    showMessageBox(`Failed to load assets: ${data.error.message}`, 'error');
+                    assetSelect.innerHTML = '<option value="">Error loading assets</option>';
+                    reject(new Error(data.error.message));
+                    derivSocket.close();
+                    return;
+                }
+                if (data.msg_type === 'active_symbols') { // Check for explicit message type
+                    if (data.active_symbols && data.active_symbols.length > 0) {
+                        const symbols = data.active_symbols.filter(s =>
+                            s.market === 'forex' || s.market === 'indices' || s.market === 'synthetic_index'
+                        ).sort((a, b) => a.display_name.localeCompare(b.display_name));
+
+                        assetSelect.innerHTML = ''; // Clear loading message
+                        if (symbols.length > 0) {
+                            symbols.forEach(symbol => {
+                                const option = document.createElement('option');
+                                option.value = symbol.symbol;
+                                option.textContent = symbol.display_name;
+                                assetSelect.appendChild(option);
+                            });
+                            assetSelect.disabled = false; // Enable dropdown
+                            resolve();
+                        } else {
+                            assetSelect.innerHTML = '<option value="">No relevant assets found</option>';
+                            showMessageBox('No relevant trading assets found from the API.', 'warning');
+                            reject(new Error('No relevant assets found'));
+                        }
+                    } else {
+                        assetSelect.innerHTML = '<option value="">No assets received</option>';
+                        showMessageBox('No assets data received from the API.', 'warning');
+                        reject(new Error('No assets data received'));
+                    }
+                    derivSocket.close();
+                }
+            };
+
+            derivSocket.onerror = (event) => {
+                console.error('Deriv WebSocket error:', event);
+                showMessageBox('Failed to connect to Deriv WebSocket for assets. Check your network.', 'error');
+                assetSelect.innerHTML = '<option value="">Network error</option>';
+                reject(new Error('WebSocket connection error'));
+                derivSocket.close();
+            };
+
+            derivSocket.onclose = () => {
+                console.log('Deriv WebSocket closed.');
+            };
+
+            // Set a timeout to reject if no message is received within a certain time
+            setTimeout(() => {
+                if (assetSelect.disabled) { // If still disabled, means no assets loaded
+                    showMessageBox('Asset loading timed out. Please refresh and try again.', 'error');
+                    assetSelect.innerHTML = '<option value="">Loading timed out</option>';
+                    reject(new Error('Asset loading timed out'));
+                    derivSocket.close();
+                }
+            }, 10000); // 10 seconds timeout
+        });
+    }
+
+    // Call loadAssets on DOMContentLoaded
+    loadAssets().catch(err => console.error("Error during initial asset load:", err));
 
 
     // 2. Function to initialize and update the chart
@@ -79,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const containerHeight = chartContainer.clientHeight;
 
         if (containerWidth === 0 || containerHeight === 0) {
-            console.warn('Chart container has no dimensions. Deferring chart creation.');
+            console.warn('Chart container has no dimensions. Cannot create chart.');
             chartContainer.innerHTML = 'Chart container not ready. Please try again.';
             return;
         }
@@ -108,7 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
         candleSeries.setData(marketData.candles);
 
         // Add SMA Line
-        if (marketData.indicators.sma50) {
+        if (marketData.indicators.sma50 && marketData.indicators.sma50.length > 0) {
             const smaLine = chart.addLineSeries({ color: 'rgba(5, 122, 255, 0.8)', lineWidth: 2 });
             const smaData = marketData.candles
                 .map((candle, index) => ({
@@ -120,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Add Bollinger Bands
-        if (marketData.indicators.bollingerBands) {
+        if (marketData.indicators.bollingerBands && marketData.indicators.bollingerBands.length > 0) {
             const bbUpper = chart.addLineSeries({ color: 'rgba(204, 102, 0, 0.5)', lineWidth: 1 });
             const bbMiddle = chart.addLineSeries({ color: 'rgba(204, 102, 0, 0.5)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
             const bbLower = chart.addLineSeries({ color: 'rgba(204, 102, 0, 0.5)', lineWidth: 1 });
