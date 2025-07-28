@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loader = document.getElementById('loader');
     const resultsContent = document.getElementById('results-content');
     const errorMessage = document.getElementById('error-message');
-    const chartContainer = document.getElementById('chart-container');
+    const chartContainer = document.getElementById('chart-container'); // Get the chart container element
 
     const entryPointEl = document.getElementById('entry-point');
     const stopLossEl = document.getElementById('stop-loss');
@@ -25,191 +25,171 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const messageBox = document.createElement('div');
         messageBox.className = `message-box ${type}`;
-        messageBox.innerHTML = `<p>${message}</p><button class="message-box-close">OK</button>`;
+        messageBox.innerHTML = `<p>${message}</p><button class=\"message-box-close\">OK</button>`;
         document.body.appendChild(messageBox);
-        messageBox.querySelector('.message-box-close').addEventListener('click', () => messageBox.remove());
+        messageBox.querySelector('.message-box-close').onclick = () => messageBox.remove();
     }
 
-    // 1. Populate asset dropdown
-    // Encapsulate asset loading in a dedicated function for better control
-    async function loadAssets() {
-        assetSelect.innerHTML = '<option value="">Loading assets...</option>'; // Show loading state
-        assetSelect.disabled = true; // Disable until loaded
+    // Function to fetch and populate assets
+    async function fetchAndPopulateAssets() {
+        try {
+            // Using a public endpoint for Deriv available assets
+            const response = await fetch('https://raw.githubusercontent.com/binary-com/asset-index/master/asset-index.json');
+            const data = await response.json();
+            const syntheticIndices = data.assets.filter(asset => asset.symbol.startsWith('R_'));
 
-        return new Promise((resolve, reject) => {
-            const derivSocket = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
+            assetSelect.innerHTML = '<option value="">Select Asset</option>'; // Default option
 
-            derivSocket.onopen = () => {
-                derivSocket.send(JSON.stringify({ active_symbols: "brief", product_type: "basic" }));
-            };
-
-            derivSocket.onmessage = (msg) => {
-                const data = JSON.parse(msg.data);
-                if (data.error) {
-                    showMessageBox(`Failed to load assets: ${data.error.message}`, 'error');
-                    assetSelect.innerHTML = '<option value="">Error loading assets</option>';
-                    reject(new Error(data.error.message));
-                    derivSocket.close();
-                    return;
-                }
-                if (data.msg_type === 'active_symbols') { // Check for explicit message type
-                    if (data.active_symbols && data.active_symbols.length > 0) {
-                        const symbols = data.active_symbols.filter(s =>
-                            s.market === 'forex' || s.market === 'indices' || s.market === 'synthetic_index'
-                        ).sort((a, b) => a.display_name.localeCompare(b.display_name));
-
-                        assetSelect.innerHTML = ''; // Clear loading message
-                        if (symbols.length > 0) {
-                            symbols.forEach(symbol => {
-                                const option = document.createElement('option');
-                                option.value = symbol.symbol;
-                                option.textContent = symbol.display_name;
-                                assetSelect.appendChild(option);
-                            });
-                            assetSelect.disabled = false; // Enable dropdown
-                            resolve();
-                        } else {
-                            assetSelect.innerHTML = '<option value="">No relevant assets found</option>';
-                            showMessageBox('No relevant trading assets found from the API.', 'warning');
-                            reject(new Error('No relevant assets found'));
-                        }
-                    } else {
-                        assetSelect.innerHTML = '<option value="">No assets received</option>';
-                        showMessageBox('No assets data received from the API.', 'warning');
-                        reject(new Error('No assets data received'));
-                    }
-                    derivSocket.close();
-                }
-            };
-
-            derivSocket.onerror = (event) => {
-                console.error('Deriv WebSocket error:', event);
-                showMessageBox('Failed to connect to Deriv WebSocket for assets. Check your network.', 'error');
-                assetSelect.innerHTML = '<option value="">Network error</option>';
-                reject(new Error('WebSocket connection error'));
-                derivSocket.close();
-            };
-
-            derivSocket.onclose = () => {
-                console.log('Deriv WebSocket closed.');
-            };
-
-            // Set a timeout to reject if no message is received within a certain time
-            setTimeout(() => {
-                if (assetSelect.disabled) { // If still disabled, means no assets loaded
-                    showMessageBox('Asset loading timed out. Please refresh and try again.', 'error');
-                    assetSelect.innerHTML = '<option value="">Loading timed out</option>';
-                    reject(new Error('Asset loading timed out'));
-                    derivSocket.close();
-                }
-            }, 10000); // 10 seconds timeout
-        });
-    }
-
-    // Call loadAssets on DOMContentLoaded
-    loadAssets().catch(err => console.error("Error during initial asset load:", err));
-
-
-    // 2. Function to initialize and update the chart
-    function displayChartData(marketData) {
-        if (!marketData || !marketData.candles || marketData.candles.length === 0) {
-            chartContainer.innerHTML = 'Not enough data to display chart.';
-            return;
+            syntheticIndices.forEach(asset => {
+                const option = document.createElement('option');
+                option.value = asset.symbol;
+                option.textContent = asset.name;
+                assetSelect.appendChild(option);
+            });
+        } catch (error) {
+            console.error('Failed to fetch assets:', error);
+            assetSelect.innerHTML = '<option value="">Failed to load assets</option>';
+            showMessageBox('Failed to load assets. Please try refreshing the page.', 'error');
         }
+    }
 
-        // Clear previous chart if it exists
+    // Call fetchAndPopulateAssets on page load
+    fetchAndPopulateAssets();
+
+
+    // Function to display chart data
+    function displayChartData(marketData) {
         if (chart) {
-            chart.remove();
+            chart.remove(); // Remove existing chart if any
             chart = null;
         }
-        chartContainer.innerHTML = ''; // Clear any error messages
 
-        // Ensure chart container has dimensions before creating the chart
-        const containerWidth = chartContainer.clientWidth;
-        const containerHeight = chartContainer.clientHeight;
-
-        if (containerWidth === 0 || containerHeight === 0) {
-            console.warn('Chart container has no dimensions. Cannot create chart.');
-            chartContainer.innerHTML = 'Chart container not ready. Please try again.';
+        // *** DEBUGGING LOG: Check if chartContainer is found ***
+        console.log('chartContainer element:', chartContainer);
+        if (!chartContainer) {
+            console.error('Error: chart-container element not found in the DOM.');
+            showMessageBox('Chart container not found. Cannot display chart.', 'error');
             return;
         }
+
 
         chart = LightweightCharts.createChart(chartContainer, {
-            width: containerWidth,
-            height: containerHeight,
-            layout: { backgroundColor: '#ffffff', textColor: '#333' },
-            grid: { vertLines: { color: '#f0f0f0' }, horzLines: { color: '#f0f0f0' } },
-            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-            rightPriceScale: { borderColor: '#cccccc' },
-            timeScale: { borderColor: '#cccccc' },
+            width: chartContainer.clientWidth,
+            height: 400,
+            layout: {
+                backgroundColor: '#ffffff',
+                textColor: '#333',
+            },
+            grid: {
+                vertLines: { color: '#e0e0e0' },
+                horzLines: { color: '#e0e0e0' },
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+            priceScale: {
+                borderColor: '#e0e0e0',
+            },
+            timeScale: {
+                borderColor: '#e0e0e0',
+                timeVisible: true,
+                secondsVisible: false,
+            },
         });
 
-        // Check if chart was successfully created
-        if (!chart) {
-            console.error('Failed to create LightweightCharts instance.');
-            chartContainer.innerHTML = 'Failed to initialize chart. Please refresh.';
+        // *** DEBUGGING LOG: Check the chart object after creation ***
+        console.log('Chart object after creation:', chart);
+
+        // *** CRITICAL CHECK: Ensure chart is a valid object before adding series ***
+        if (!chart || typeof chart.addCandlestickSeries !== 'function') {
+            console.error('Error: Lightweight Charts failed to create a valid chart instance.');
+            showMessageBox('Failed to initialize chart. Please try again or check console for details.', 'error');
             return;
         }
 
-        const candleSeries = chart.addCandlestickSeries({
-            upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
-            wickUpColor: '#26a69a', wickDownColor: '#ef5350'
-        });
-        candleSeries.setData(marketData.candles);
 
-        // Add SMA Line
+        const candlestickSeries = chart.addCandlestickSeries({
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderVisible: false,
+            wickUpColor: '#26a69a',
+            wickDownColor: '#ef5350',
+        });
+
+        const formattedCandles = marketData.candles.map(c => ({
+            time: c.time,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+        }));
+
+        candlestickSeries.setData(formattedCandles);
+
+        // Add SMA (50) overlay
         if (marketData.indicators.sma50 && marketData.indicators.sma50.length > 0) {
-            const smaLine = chart.addLineSeries({ color: 'rgba(5, 122, 255, 0.8)', lineWidth: 2 });
-            const smaData = marketData.candles
-                .map((candle, index) => ({
-                    time: candle.time,
-                    value: marketData.indicators.sma50[index]
-                }))
-                .filter(d => typeof d.value === 'number'); // Filter out non-numeric values
-            smaLine.setData(smaData);
+            const smaData = marketData.indicators.sma50.map((sma, index) => ({
+                // Ensure time aligns with candle data
+                time: formattedCandles[formattedCandles.length - marketData.indicators.sma50.length + index].time,
+                value: sma,
+            }));
+            const smaSeries = chart.addLineSeries({ color: 'blue', lineWidth: 1 });
+            smaSeries.setData(smaData);
         }
 
-        // Add Bollinger Bands
+        // Add Bollinger Bands overlay
         if (marketData.indicators.bollingerBands && marketData.indicators.bollingerBands.length > 0) {
-            const bbUpper = chart.addLineSeries({ color: 'rgba(204, 102, 0, 0.5)', lineWidth: 1 });
-            const bbMiddle = chart.addLineSeries({ color: 'rgba(204, 102, 0, 0.5)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
-            const bbLower = chart.addLineSeries({ color: 'rgba(204, 102, 0, 0.5)', lineWidth: 1 });
+            const bbUpper = marketData.indicators.bollingerBands.map((bb, index) => ({
+                time: formattedCandles[formattedCandles.length - marketData.indicators.bollingerBands.length + index].time,
+                value: bb.upper,
+            }));
+            const bbMiddle = marketData.indicators.bollingerBands.map((bb, index) => ({
+                time: formattedCandles[formattedCandles.length - marketData.indicators.bollingerBands.length + index].time,
+                value: bb.middle,
+            }));
+            const bbLower = marketData.indicators.bollingerBands.map((bb, index) => ({
+                time: formattedCandles[formattedCandles.length - marketData.indicators.bollingerBands.length + index].time,
+                value: bb.lower,
+            }));
 
-            const bbData = marketData.candles
-                .map((candle, index) => ({
-                    time: candle.time,
-                    upper: marketData.indicators.bollingerBands[index]?.upper,
-                    middle: marketData.indicators.bollingerBands[index]?.middle,
-                    lower: marketData.indicators.bollingerBands[index]?.lower
-                }))
-                .filter(d => typeof d.upper === 'number' && typeof d.middle === 'number' && typeof d.lower === 'number');
+            const bbUpperSeries = chart.addLineSeries({ color: 'purple', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
+            const bbMiddleSeries = chart.addLineSeries({ color: 'gray', lineWidth: 1 });
+            const bbLowerSeries = chart.addLineSeries({ color: 'purple', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
 
-            bbUpper.setData(bbData.map(d => ({ time: d.time, value: d.upper })));
-            bbMiddle.setData(bbData.map(d => ({ time: d.time, value: d.middle })));
-            bbLower.setData(bbData.map(d => ({ time: d.time, value: d.lower })));
+            bbUpperSeries.setData(bbUpper);
+            bbMiddleSeries.setData(bbMiddle);
+            bbLowerSeries.setData(bbLower);
         }
 
         chart.timeScale().fitContent();
     }
 
 
-    // 3. Handle "Analyze" button click
+    // Event listener for analysis button
     analyzeBtn.addEventListener('click', async () => {
         const selectedAsset = assetSelect.value;
         const selectedTimeframe = timeframeSelect.value;
-        if (!selectedAsset) {
-            showMessageBox('Please select an asset before analyzing.', 'warning');
+
+        if (!selectedAsset || !selectedTimeframe) {
+            showMessageBox('Please select both an asset and a timeframe.', 'warning');
             return;
         }
 
+        // 1. Show loader, hide results and error
         resultsContainer.classList.remove('results-hidden');
         resultsContent.style.display = 'none';
-        loader.classList.remove('loader-hidden');
         errorMessage.classList.add('error-hidden');
-        errorMessage.textContent = '';
-        chartContainer.innerHTML = ''; // Clear previous chart message/content
+        loader.classList.remove('loader-hidden');
 
         try {
+            // 2. Clear previous chart data if any
+            if (chart) {
+                chart.remove();
+                chart = null;
+            }
+            chartContainer.innerHTML = ''; // Clear the container
+
+            // 3. Make API request to backend
             const response = await fetch('/api/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
