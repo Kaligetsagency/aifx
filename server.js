@@ -45,26 +45,25 @@ function calculateTechnicalIndicators(candles) {
         high: candles.map(c => c.high),
         low: candles.map(c => c.low),
         close: candles.map(c => c.close),
-        volume: candles.map(c => c.volume),
-        period: 0
+        volume: candles.map(c => c.volume || 0), // Use 0 for volume if not present
     };
 
-    const rsi = ta.rsi({ values: input.close, period: 14 });
-    const macd = ta.macd({ values: input.close, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 });
-    const bollingerBands = ta.bollingerbands({ values: input.close, period: 20, stdDev: 2 });
-    const ema50 = ta.ema({ values: input.close, period: 50 });
-    const ema200 = ta.ema({ values: input.close, period: 200 });
+    const sma20 = ta.sma({ period: 20, values: input.close });
+    const rsi14 = ta.rsi({ period: 14, values: input.close });
+    const macd = ta.macd({ values: input.close, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false });
+    const bollingerBands = ta.bollingerbands({ period: 20, stdDev: 2, values: input.close });
 
+    // Align indicator arrays with the candle array, as they have different starting points.
     return candles.map((candle, index) => {
+        const smaIndex = index - 19;
         const rsiIndex = index - 14;
-        const macdIndex = index - 25;
+        const macdIndex = index - 25; // Based on the slow period of 26
         const bbIndex = index - 19;
-        const ema50Index = index - 49;
-        const ema200Index = index - 199;
 
         return {
             ...candle,
-            rsi: rsiIndex >= 0 ? parseFloat(rsi[rsiIndex].toFixed(2)) : null,
+            sma20: smaIndex >= 0 ? parseFloat(sma20[smaIndex].toFixed(4)) : null,
+            rsi: rsiIndex >= 0 ? parseFloat(rsi14[rsiIndex].toFixed(2)) : null,
             macd: macdIndex >= 0 ? {
                 MACD: parseFloat(macd[macdIndex].MACD.toFixed(4)),
                 signal: parseFloat(macd[macdIndex].signal.toFixed(4)),
@@ -75,8 +74,6 @@ function calculateTechnicalIndicators(candles) {
                 middle: parseFloat(bollingerBands[bbIndex].middle.toFixed(4)),
                 lower: parseFloat(bollingerBands[bbIndex].lower.toFixed(4))
             } : null,
-            ema50: ema50Index >= 0 ? parseFloat(ema50[ema50Index].toFixed(4)) : null,
-            ema200: ema200Index >= 0 ? parseFloat(ema200[ema200Index].toFixed(4)) : null,
         };
     });
 }
@@ -138,21 +135,22 @@ app.post('/api/analyze', async (req, res) => {
 
         const prompt = `You are a world-class algorithmic trading strategist. Your objective is to generate a precise trade recommendation for a ${asset} trade on the ${timeframe} timeframe.
 
-Analyze the provided historical candle data, which includes values for RSI, MACD, Bollinger Bands, and 50/200 period EMAs. Your analysis should:
-1.  Identify the dominant trend using the EMAs.
-2.  Assess momentum using the MACD and RSI. Note any divergences or overbought/oversold conditions.
-3.  Evaluate volatility and potential breakout zones using the Bollinger Bands.
-4.  Identify key support and resistance levels from the price action.
+Analyze the provided historical candle data, which includes values for a 20-period SMA, 14-period RSI, MACD, and Bollinger Bands. Your analysis should:
+1.  Identify the dominant trend and key support/resistance levels.
+2.  Assess momentum using MACD and RSI, noting any divergences or overbought/oversold conditions.
+3.  Evaluate volatility and price action relative to the Bollinger Bands and SMA.
+4.  Detect any significant candlestick or chart patterns.
 
 Based on this comprehensive analysis, determine an optimal trade setup. Return ONLY a JSON object with the following five keys: "entryPoint", "stopLoss", "takeProfit", "justification", and "confidenceScore".
 - The "justification" should be a brief, one-sentence explanation of your reasoning.
 - The "confidenceScore" should be an integer from 1 to 10, where 10 is the highest confidence.
+- The take-profit should target a minimum 1.5:1 reward-to-risk ratio.
 - Do not include any other text, markdown formatting, or explanations.
 
-Data (last 50 candles): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`;
+Data (last 200 candles): ${JSON.stringify(marketDataWithIndicators.slice(-200))}`;
 
         const apiKey = process.env.GEMINI_API_KEY;
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
         const aiResponse = await fetch(apiUrl, {
             method: 'POST',
@@ -167,59 +165,34 @@ Data (last 50 candles): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`;
             throw new Error(`Gemini API request failed with status ${aiResponse.status}: ${errorBody}`);
         }
 
-        // --- NEW: Robust AI Response Handling ---
-        const responseText = await aiResponse.text();
-        if (!responseText) {
-            throw new Error('The AI returned an empty response. This may be due to content filters or a service issue.');
-        }
+        const aiResult = await aiResponse.json();
 
-        let aiResult;
-        try {
-            aiResult = JSON.parse(responseText);
-        } catch (e) {
-            console.error("Failed to parse AI response. Text:", responseText);
-            throw new Error('The AI returned an invalid (non-JSON) response.');
-        }
-
-        if (!aiResult.candidates || aiResult.candidates.length === 0) {
+        if (!aiResult.candidates || !aiResult.candidates[0] || !aiResult.candidates[0].content || !aiResult.candidates[0].content.parts[0] || !aiResult.candidates[0].content.parts[0].text) {
              if (aiResult.promptFeedback && aiResult.promptFeedback.blockReason) {
                  throw new Error(`AI request was blocked. Reason: ${aiResult.promptFeedback.blockReason}`);
              }
-            throw new Error('The AI response is missing the expected data.');
+            throw new Error('Invalid response structure from Gemini API.');
         }
 
-        const candidate = aiResult.candidates[0];
-
-        if (!candidate.content || !candidate.content.parts || !candidate.content.parts[0].text) {
-            if (candidate.finishReason && candidate.finishReason !== 'STOP') {
-                 throw new Error(`Analysis was stopped by the AI. Reason: ${candidate.finishReason}. This may be due to safety settings.`);
-            }
-            throw new Error('The AI returned an invalid content structure in its response.');
-        }
-        // --- End of new handling ---
-
-        const aiText = candidate.content.parts[0].text;
+        const responseText = aiResult.candidates[0].content.parts[0].text;
         
-        // --- FIX START ---
-        // The original JSON parsing using indexOf and lastIndexOf was brittle.
-        // This new logic robustly extracts a JSON object, even if it's embedded
-        // in text or markdown code fences from the AI's response.
+        // Robustly find and extract the JSON object from the AI's response.
         let jsonString = '';
-        
-        // Regex to find a JSON object optionally wrapped in markdown ```json ... ```
-        const jsonMatch = aiText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```|(\{[\s\S]*\})/);
+        const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```|(\{[\s\S]*\})/);
 
         if (jsonMatch) {
-            // Prioritize the content from the markdown block if present, otherwise use the broader match.
+            // Prioritize content from the markdown block, otherwise use the broader match.
             jsonString = jsonMatch[1] || jsonMatch[2];
-        } else {
-            console.error("Could not find a valid JSON object in the AI response text:", aiText);
+        }
+
+        if (!jsonString) {
+            console.error("Could not find JSON object in response:", responseText);
             throw new Error('Could not find a valid JSON object in the AI response.');
         }
-        // --- FIX END ---
-        
+
         try {
             const analysis = JSON.parse(jsonString);
+            // Return both the analysis and the market data for the client-side chart.
             res.json({ analysis, marketData: marketDataWithIndicators });
         } catch (e) {
             console.error("Final attempt to parse JSON failed. String was:", jsonString);
