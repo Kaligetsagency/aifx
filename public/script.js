@@ -1,234 +1,188 @@
 // public/script.js
 // Client-side logic for the trading analysis UI.
 
-document.addEventListener('DOMContentLoaded', () => {
-    const assetSelect = document.getElementById('asset-select');
-    const timeframeSelect = document.getElementById('timeframe-select');
-    const analyzeBtn = document.getElementById('analyze-btn');
-    const resultsContainer = document.getElementById('results-container');
-    const loader = document.getElementById('loader');
-    const resultsContent = document.getElementById('results-content');
-    const errorMessage = document.getElementById('error-message');
-    const chartContainer = document.getElementById('chart-container'); // Get the chart container element
+document.addEventListener('DOMContentLoaded', () => { //
+    const assetSelect = document.getElementById('asset-select'); //
+    const timeframeSelect = document.getElementById('timeframe-select'); //
+    const analyzeBtn = document.getElementById('analyze-btn'); //
+    const resultsContainer = document.getElementById('results-container'); //
+    const loader = document.getElementById('loader'); //
+    const resultsContent = document.getElementById('results-content'); //
+    const errorMessage = document.getElementById('error-message'); //
 
-    const entryPointEl = document.getElementById('entry-point');
-    const stopLossEl = document.getElementById('stop-loss');
-    const takeProfitEl = document.getElementById('take-profit');
-    const rationaleEl = document.getElementById('rationale');
+    const entryPointEl = document.getElementById('entry-point'); //
+    const stopLossEl = document.getElementById('stop-loss'); //
+    const takeProfitEl = document.getElementById('take-profit'); //
+    // New Elements
+    const confidenceScoreEl = document.getElementById('confidence-score');
+    const justificationEl = document.getElementById('justification');
+    const chartContainer = document.getElementById('chart-container');
 
-    let chart = null; // To hold the chart instance
+    const derivSocket = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089'); //
 
-    // Function to show a custom message box
-    function showMessageBox(message, type = 'error') {
-        // Remove existing message boxes first
-        document.querySelectorAll('.message-box').forEach(box => box.remove());
+    let chart = null; // Variable to hold the chart instance
+    let candleSeries = null; // Variable for the main candle series
 
-        const messageBox = document.createElement('div');
-        messageBox.className = `message-box ${type}`;
-        messageBox.innerHTML = `<p>${message}</p><button class=\"message-box-close\">OK</button>`;
-        document.body.appendChild(messageBox);
-        messageBox.querySelector('.message-box-close').onclick = () => messageBox.remove();
-    }
-
-    // Function to fetch and populate assets
-    async function fetchAndPopulateAssets() {
-        try {
-            // *** IMPORTANT FIX: Fetching from your backend endpoint ***
-            const response = await fetch('/api/assets');
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Network response was not ok.');
-            }
-            const syntheticIndices = await response.json(); // Data is already filtered by backend
-
-            assetSelect.innerHTML = '<option value="">Select Asset</option>'; // Default option
-
-            if (syntheticIndices.length === 0) {
-                assetSelect.innerHTML += '<option value="">No assets found</option>';
-            } else {
-                syntheticIndices.forEach(asset => {
-                    const option = document.createElement('option');
-                    option.value = asset.symbol;
-                    option.textContent = asset.name;
-                    assetSelect.appendChild(option);
-                });
-            }
-        } catch (error) {
-            console.error('Failed to fetch assets:', error);
-            assetSelect.innerHTML = '<option value="">Failed to load assets</option>';
-            showMessageBox('Failed to load assets: ' + error.message, 'error');
-        }
-    }
-
-    // Call fetchAndPopulateAssets on page load
-    fetchAndPopulateAssets();
-
-
-    // Function to display chart data
-    function displayChartData(marketData) {
+    // Function to initialize or update the chart
+    function setupChart() {
         if (chart) {
-            chart.remove(); // Remove existing chart if any
-            chart = null;
+            chart.remove();
         }
-
-        // *** DEBUGGING LOG: Check if chartContainer is found ***
-        console.log('chartContainer element:', chartContainer);
-        if (!chartContainer) {
-            console.error('Error: chart-container element not found in the DOM.');
-            showMessageBox('Chart container not found. Cannot display chart.', 'error');
-            return;
-        }
-
-
         chart = LightweightCharts.createChart(chartContainer, {
             width: chartContainer.clientWidth,
-            height: 400,
+            height: 350,
             layout: {
-                backgroundColor: '#ffffff',
+                background: { color: '#ffffff' },
                 textColor: '#333',
             },
             grid: {
-                vertLines: { color: '#e0e0e0' },
-                horzLines: { color: '#e0e0e0' },
+                vertLines: { color: '#e1e1e1' },
+                horzLines: { color: '#e1e1e1' },
             },
             crosshair: {
                 mode: LightweightCharts.CrosshairMode.Normal,
             },
-            priceScale: {
-                borderColor: '#e0e0e0',
-            },
             timeScale: {
-                borderColor: '#e0e0e0',
-                timeVisible: true,
-                secondsVisible: false,
+                borderColor: '#cccccc',
             },
         });
-
-        // *** DEBUGGING LOG: Check the chart object after creation ***
-        console.log('Chart object after creation:', chart);
-
-        // *** CRITICAL CHECK: Ensure chart is a valid object before adding series ***
-        if (!chart || typeof chart.addCandlestickSeries !== 'function') {
-            console.error('Error: Lightweight Charts failed to create a valid chart instance.');
-            showMessageBox('Failed to initialize chart. Please try again or check console for details.', 'error');
-            return;
-        }
-
-
-        const candlestickSeries = chart.addCandlestickSeries({
+        candleSeries = chart.addCandlestickSeries({
             upColor: '#26a69a',
             downColor: '#ef5350',
-            borderVisible: false,
-            wickUpColor: '#26a69a',
+            borderDownColor: '#ef5350',
+            borderUpColor: '#26a69a',
             wickDownColor: '#ef5350',
+            wickUpColor: '#26a69a',
         });
+    }
 
-        const formattedCandles = marketData.candles.map(c => ({
-            time: c.time,
-            open: c.open,
-            high: c.high,
-            low: c.low,
-            close: c.close,
-        }));
-
-        candlestickSeries.setData(formattedCandles);
-
-        // Add SMA (50) overlay
-        if (marketData.indicators.sma50 && marketData.indicators.sma50.length > 0) {
-            const smaData = marketData.indicators.sma50.map((sma, index) => ({
-                // Ensure time aligns with candle data
-                time: formattedCandles[formattedCandles.length - marketData.indicators.sma50.length + index].time,
-                value: sma,
-            }));
-            const smaSeries = chart.addLineSeries({ color: 'blue', lineWidth: 1 });
-            smaSeries.setData(smaData);
-        }
-
-        // Add Bollinger Bands overlay
-        if (marketData.indicators.bollingerBands && marketData.indicators.bollingerBands.length > 0) {
-            const bbUpper = marketData.indicators.bollingerBands.map((bb, index) => ({
-                time: formattedCandles[formattedCandles.length - marketData.indicators.bollingerBands.length + index].time,
-                value: bb.upper,
-            }));
-            const bbMiddle = marketData.indicators.bollingerBands.map((bb, index) => ({
-                time: formattedCandles[formattedCandles.length - marketData.indicators.bollingerBands.length + index].time,
-                value: bb.middle,
-            }));
-            const bbLower = marketData.indicators.bollingerBands.map((bb, index) => ({
-                time: formattedCandles[formattedCandles.length - marketData.indicators.bollingerBands.length + index].time,
-                value: bb.lower,
-            }));
-
-            const bbUpperSeries = chart.addLineSeries({ color: 'purple', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
-            const bbMiddleSeries = chart.addLineSeries({ color: 'gray', lineWidth: 1 });
-            const bbLowerSeries = chart.addLineSeries({ color: 'purple', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
-
-            bbUpperSeries.setData(bbUpper);
-            bbMiddleSeries.setData(bbMiddle);
-            bbLowerSeries.setData(bbLower);
-        }
-
-        chart.timeScale().fitContent();
+    // Function to draw a horizontal line on the chart
+    function drawPriceLine(price, color, title) {
+        return candleSeries.createPriceLine({
+            price: price,
+            color: color,
+            lineWidth: 2,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: title,
+        });
     }
 
 
-    // Event listener for analysis button
-    analyzeBtn.addEventListener('click', async () => {
-        const selectedAsset = assetSelect.value;
-        const selectedTimeframe = timeframeSelect.value;
+    // 1. Populate asset dropdown on page load
+    derivSocket.onopen = function(e) { //
+        derivSocket.send(JSON.stringify({ //
+            active_symbols: "brief", //
+            product_type: "basic" //
+        }));
+    };
 
-        if (!selectedAsset || !selectedTimeframe) {
-            showMessageBox('Please select both an asset and a timeframe.', 'warning');
+    derivSocket.onmessage = function(msg) { //
+        const data = JSON.parse(msg.data); //
+
+        if (data.error) { //
+            console.error('Deriv API error:', data.error.message); //
             return;
         }
 
-        // 1. Show loader, hide results and error
-        resultsContainer.classList.remove('results-hidden');
-        resultsContent.style.display = 'none';
-        errorMessage.classList.add('error-hidden');
-        loader.classList.remove('loader-hidden');
+        if (data.active_symbols) { //
+            const activeSymbols = data.active_symbols; //
+            assetSelect.innerHTML = ''; // Clear loading message
+
+            const filteredSymbols = activeSymbols.filter(s => //
+                s.market === 'forex' || s.market === 'indices' || s.market === 'synthetic_index' //
+            );
+
+            filteredSymbols.sort((a, b) => a.display_name.localeCompare(b.display_name)); //
+
+            filteredSymbols.forEach(symbol => { //
+                const option = document.createElement('option'); //
+                option.value = symbol.symbol; //
+                option.textContent = symbol.display_name; //
+                assetSelect.appendChild(option); //
+            });
+            derivSocket.close(); //
+        }
+    };
+
+    derivSocket.onerror = function(err) { //
+        console.error('WebSocket Error:', err); //
+        assetSelect.innerHTML = `<option value="">Failed to connect</option>`; //
+    };
+
+    // 2. Handle "Analyze" button click
+    analyzeBtn.addEventListener('click', async () => { //
+        const selectedAsset = assetSelect.value; //
+        const selectedTimeframe = timeframeSelect.value; //
+
+        if (!selectedAsset) { //
+            alert('Please select an asset before analyzing.'); //
+            return; //
+        }
+
+        resultsContainer.classList.remove('results-hidden'); //
+        resultsContent.style.display = 'none'; //
+        loader.classList.remove('loader-hidden'); //
+        errorMessage.classList.add('error-hidden'); //
+        errorMessage.textContent = ''; //
+        chartContainer.style.display = 'none';
 
         try {
-            // 2. Clear previous chart data if any
-            if (chart) {
-                chart.remove();
-                chart = null;
-            }
-            chartContainer.innerHTML = ''; // Clear the container
-
-            // 3. Make API request to backend
-            const response = await fetch('/api/analyze', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ asset: selectedAsset, timeframe: selectedTimeframe })
+            const response = await fetch('/api/analyze', { //
+                method: 'POST', //
+                headers: { //
+                    'Content-Type': 'application/json' //
+                },
+                body: JSON.stringify({ //
+                    asset: selectedAsset, //
+                    timeframe: selectedTimeframe //
+                })
             });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.error || `HTTP error! Status: ${response.status}`);
 
-            // 4. Display results and chart
-            const analysis = result.analysis;
-            entryPointEl.textContent = analysis.entryPoint ? parseFloat(analysis.entryPoint).toFixed(4) : 'N/A';
-            stopLossEl.textContent = analysis.stopLoss ? parseFloat(analysis.stopLoss).toFixed(4) : 'N/A';
-            takeProfitEl.textContent = analysis.takeProfit ? parseFloat(analysis.takeProfit).toFixed(4) : 'N/A';
-            rationaleEl.textContent = analysis.rationale || 'No rationale provided.';
+            const result = await response.json(); //
 
-            displayChartData(result.marketData);
+            if (!response.ok) { //
+                throw new Error(result.error || `HTTP error! Status: ${response.status}`); //
+            }
 
-            loader.classList.add('loader-hidden');
-            resultsContent.style.display = 'block';
+            const { analysis, marketData } = result;
 
-        } catch (error) {
-            console.error('Analysis request failed:', error);
-            errorMessage.textContent = `Analysis failed: ${error.message}`;
-            errorMessage.classList.remove('error-hidden');
-            loader.classList.add('loader-hidden');
-        }
-    });
+            // 3. Display results
+            entryPointEl.textContent = analysis.entryPoint ? parseFloat(analysis.entryPoint).toFixed(4) : 'N/A'; //
+            stopLossEl.textContent = analysis.stopLoss ? parseFloat(analysis.stopLoss).toFixed(4) : 'N/A'; //
+            takeProfitEl.textContent = analysis.takeProfit ? parseFloat(analysis.takeProfit).toFixed(4) : 'N/A'; //
+            confidenceScoreEl.textContent = `${analysis.confidenceScore || 'N/A'} / 10`;
+            justificationEl.textContent = analysis.justification || 'N/A';
 
-    // Resize chart with window
-    window.addEventListener('resize', () => {
-        if (chart) {
-            chart.applyOptions({ width: chartContainer.clientWidth });
+
+            // 4. Setup and display chart
+            chartContainer.style.display = 'block';
+            setupChart();
+            const chartData = marketData.map(d => ({
+                time: d.epoch,
+                open: d.open,
+                high: d.high,
+                low: d.low,
+                close: d.close
+            }));
+            candleSeries.setData(chartData);
+
+            // Draw trade levels on chart
+            if (analysis.entryPoint) drawPriceLine(analysis.entryPoint, '#1E88E5', 'Entry');
+            if (analysis.stopLoss) drawPriceLine(analysis.stopLoss, '#d32f2f', 'Stop Loss');
+            if (analysis.takeProfit) drawPriceLine(analysis.takeProfit, '#388E3C', 'Take Profit');
+
+            chart.timeScale().fitContent();
+
+
+            loader.classList.add('loader-hidden'); //
+            resultsContent.style.display = 'block'; //
+
+        } catch (error) { //
+            console.error('Analysis request failed:', error); //
+            errorMessage.textContent = `Analysis failed: ${error.message}`; //
+            errorMessage.classList.remove('error-hidden'); //
+            loader.classList.add('loader-hidden'); //
         }
     });
 });
