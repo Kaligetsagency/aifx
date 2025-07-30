@@ -4,326 +4,212 @@
 const express = require('express');
 const WebSocket = require('ws');
 const dotenv = require('dotenv');
-const fetch = require('node-fetch'); // Make sure node-fetch is compatible with your Node.js version (v2 for CommonJS)
-const finnhub = require('finnhub');
-const { SMA, RSI, MACD, BollingerBands } = require('technicalindicators');
+const fetch = require('node-fetch');
+const ta = require('technicalindicators');
 
-// Load environment variables
-dotenv.config();
+[cite_start]// Load environment variables from .env file [cite: 1]
+dotenv.config(); [cite_start]// [cite: 1]
+
 const app = express();
 const port = 3000;
 
-// Setup Finnhub API
-const api_key = finnhub.ApiClient.instance.authentications['api_key'];
-api_key.apiKey = process.env.FINNHUB_API_KEY;
-const finnhubClient = new finnhub.DefaultApi();
-
-// Middleware
-app.use(express.json());
-app.use(express.static('public'));
+// Middleware to parse JSON bodies
+app.use(express.json()); //
+// Serve static files from the 'public' directory
+app.use(express.static('public')); // This line should be present to serve your html, css, and js files.
 
 /**
  * Converts human-readable timeframe to seconds for the Deriv API.
  * @param {string} timeframe - The timeframe string (e.g., '1m', '5m', '1H').
  * @returns {number} The timeframe in seconds.
  */
-function getTimeframeInSeconds(timeframe) {
-    const unit = timeframe.slice(-1).toLowerCase();
-    const value = parseInt(timeframe.slice(0, -1));
-    switch (unit) {
-        case 'm': return value * 60;
-        case 'h': return value * 3600;
-        case 'd': return value * 24 * 3600;
-        default: return 60;
+function getTimeframeInSeconds(timeframe) { //
+    const unit = timeframe.slice(-1).toLowerCase(); //
+    const value = parseInt(timeframe.slice(0, -1)); //
+    switch (unit) { //
+        case 'm': return value * 60; //
+        case 'h': return value * 3600; //
+        case 'd': return value * 24 * 3600; //
+        default: return 60; // Default to 1 minute
     }
 }
 
 /**
- * Calculates a suite of technical indicators for the candle data.
- * @param {Array<Object>} candles - Array of candle objects.
- * @returns {Object} An object containing candles and calculated indicators.
+ * Calculates a suite of technical indicators using the 'technicalindicators' library.
+ * @param {Array<Object>} candles - Array of candle objects from the Deriv API.
+ * @returns {Array<Object>} Candles with added technical indicator properties.
  */
-function calculateIndicators(candles) {
-    const closePrices = candles.map(c => c.close);
-    const highPrices = candles.map(c => c.high);
-    const lowPrices = candles.map(c => c.low);
-
-    // Ensure enough data for indicators to avoid errors if candles array is too small
-    const minDataPoints = 50; // For SMA(50)
-    if (closePrices.length < minDataPoints) {
-        console.warn(`Not enough candle data (${closePrices.length}) for all indicators. Minimum ${minDataPoints} required.`);
-        return {
-            sma50: [],
-            rsi: [],
-            macd: [],
-            bollingerBands: []
-        };
-    }
-
-    const sma50 = SMA.calculate({ period: 50, values: closePrices });
-    const rsi = RSI.calculate({ period: 14, values: closePrices });
-    const macd = MACD.calculate({
-        values: closePrices,
-        fastPeriod: 12,
-        slowPeriod: 26,
-        signalPeriod: 9,
-        SimpleMAOscillator: false,
-        SimpleMASignal: false
-    });
-    const bollingerBands = BollingerBands.calculate({ period: 20, stdDev: 2, values: closePrices });
-
-    return {
-        sma50,
-        rsi,
-        macd,
-        bollingerBands
+function calculateTechnicalIndicators(candles) {
+    // The library requires separate arrays for each component (open, high, low, close, volume)
+    const input = {
+        open: candles.map(c => c.open),
+        high: candles.map(c => c.high),
+        low: candles.map(c => c.low),
+        close: candles.map(c => c.close),
+        volume: candles.map(c => c.volume),
+        period: 0 // placeholder
     };
+
+    // Calculate Indicators
+    const rsi = ta.rsi({ values: input.close, period: 14 });
+    const macd = ta.macd({ values: input.close, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 });
+    const bollingerBands = ta.bollingerbands({ values: input.close, period: 20, stdDev: 2 });
+    const ema50 = ta.ema({ values: input.close, period: 50 });
+    const ema200 = ta.ema({ values: input.close, period: 200 });
+
+
+    // Combine indicators with the original candle data
+    return candles.map((candle, index) => {
+        // Find the corresponding indicator value. Since indicators have a lead-in period,
+        // we need to offset the index to align the data correctly.
+        const rsiIndex = index - 14;
+        const macdIndex = index - 25; // MACD takes 26 periods to warm up
+        const bbIndex = index - 19;
+        const ema50Index = index - 49;
+        const ema200Index = index - 199;
+
+
+        return {
+            ...candle,
+            rsi: rsiIndex >= 0 ? parseFloat(rsi[rsiIndex].toFixed(2)) : null,
+            macd: macdIndex >= 0 ? {
+                MACD: parseFloat(macd[macdIndex].MACD.toFixed(4)),
+                signal: parseFloat(macd[macdIndex].signal.toFixed(4)),
+                histogram: parseFloat(macd[macdIndex].histogram.toFixed(4))
+            } : null,
+            bollingerBands: bbIndex >= 0 ? {
+                upper: parseFloat(bollingerBands[bbIndex].upper.toFixed(4)),
+                middle: parseFloat(bollingerBands[bbIndex].middle.toFixed(4)),
+                lower: parseFloat(bollingerBands[bbIndex].lower.toFixed(4))
+            } : null,
+            ema50: ema50Index >= 0 ? parseFloat(ema50[ema50Index].toFixed(4)) : null,
+            ema200: ema200Index >= 0 ? parseFloat(ema200[ema200Index].toFixed(4)) : null,
+        };
+    });
 }
 
 
 /**
- * Fetches historical candle data from Deriv API.
- * @param {string} asset - The financial asset to fetch data for.
- * @param {string} timeframe - The timeframe for the data.
+ * Deriv API communication via WebSocket to fetch historical candle data.
+ * @param {string} asset - The financial asset to fetch data for (e.g., 'R_100').
+ * @param {string} timeframe - The timeframe for the data (e.g., 'M1', 'H1').
  * @returns {Promise<any>} A promise that resolves with the fetched candles data.
  */
-function getMarketData(asset, timeframe) {
-    return new Promise((resolve, reject) => {
-        const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
-        ws.onopen = () => {
-            ws.send(JSON.stringify({
-                "ticks_history": asset,
-                "end": "latest",
-                "count": 500, // Request sufficient candles for indicators
-                "style": "candles",
-                "granularity": getTimeframeInSeconds(timeframe)
+function getMarketData(asset, timeframe) { //
+    return new Promise((resolve, reject) => { //
+        const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089'); //
+
+        ws.onopen = () => { //
+            ws.send(JSON.stringify({ //
+                "ticks_history": asset, //
+                "end": "latest", //
+                "count": 500, // Reduced for faster processing, still ample for indicators
+                "style": "candles", //
+                "granularity": getTimeframeInSeconds(timeframe) //
             }));
         };
-        ws.onmessage = (msg) => {
-            const data = JSON.parse(msg.data);
-            if (data.error) {
-                reject(new Error(data.error.message));
-                ws.close();
-            } else if (data.msg_type === 'candles') {
-                if (data.candles && data.candles.length > 0) {
-                    const candles = data.candles.map(c => ({
-                        epoch: parseInt(c.epoch),
-                        open: parseFloat(c.open),
-                        high: parseFloat(c.high),
-                        low: parseFloat(c.low),
-                        close: parseFloat(c.close)
-                    })).sort((a, b) => a.epoch - b.epoch); // Ensure chronological order
-                    resolve(candles);
-                } else {
-                    reject(new Error(`No candle data returned for ${asset}.`));
+
+        ws.onmessage = (msg) => { //
+            const data = JSON.parse(msg.data); //
+            if (data.error) { //
+                reject(new Error(data.error.message)); //
+                ws.close(); //
+            } else if (data.msg_type === 'candles') { //
+                if (data.candles && data.candles.length > 0) { //
+                    // Add technical indicators here before resolving
+                    const candlesWithIndicators = calculateTechnicalIndicators(data.candles); //
+                    resolve(candlesWithIndicators); //
+                } else { //
+                    reject(new Error(`No candle data returned for asset ${asset} and timeframe.`)); //
                 }
-                ws.close();
+                ws.close(); //
             }
         };
-        ws.onerror = (err) => reject(new Error('WebSocket error: ' + err.message));
-        ws.onclose = () => {
-            console.log('Deriv WebSocket for candles closed.');
+
+        ws.onclose = () => {}; //
+        ws.onerror = (err) => { //
+            reject(new Error('WebSocket error: ' + err.message)); //
         };
     });
 }
-
-/**
- * Fetches active symbols (synthetic indices) from the Deriv API.
- * @returns {Promise<Array<Object>>} A promise that resolves with a list of synthetic index assets.
- */
-function getActiveSymbols() {
-    return new Promise((resolve, reject) => {
-        const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
-
-        ws.onopen = () => {
-            ws.send(JSON.stringify({ active_symbols: 'brief', product_type: 'multi_barrier' }));
-        };
-
-        ws.onmessage = (msg) => {
-            const data = JSON.parse(msg.data);
-            if (data.error) {
-                reject(new Error(data.error.message));
-            } else if (data.msg_type === 'active_symbols') {
-                const syntheticIndices = data.active_symbols.filter(symbol =>
-                    symbol.market === 'synthetic_index' && symbol.is_trading_suspended === 0
-                ).map(symbol => ({
-                    symbol: symbol.symbol,
-                    name: symbol.display_name
-                }));
-                resolve(syntheticIndices);
-            }
-            ws.close();
-        };
-
-        ws.onerror = (err) => {
-            reject(new Error(`WebSocket error fetching active symbols: ${err.message}`));
-        };
-
-        ws.onclose = () => {
-            console.log('Deriv WebSocket for active symbols closed.');
-        };
-    });
-}
-
-
-/**
- * Fetches upcoming high-impact economic events from Finnhub.
- * @returns {Promise<Array<Object>>} A promise that resolves with a list of events.
- */
-function getEconomicEvents() {
-    return new Promise((resolve, reject) => {
-        const today = new Date().toISOString().split('T')[0];
-        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        finnhubClient.economicCalendar({ '_from': today, 'to': tomorrow }, (error, data, response) => {
-            if (error) {
-                console.error("Finnhub API Error:", error);
-                // Resolve with empty array instead of rejecting to allow main analysis to continue
-                // This prevents a full failure if only the news API is down.
-                resolve([]);
-            } else {
-                if (!data || !data.economicCalendar) {
-                    return resolve([]);
-                }
-                // Filter for high-impact events for major economies
-                const majorEconomies = ['US', 'EU', 'GB', 'JP', 'CN', 'DE'];
-                const highImpactEvents = data.economicCalendar.filter(e =>
-                    e.impact === 'high' && majorEconomies.includes(e.country)
-                ).map(e => ({ event: e.event, country: e.country, time: e.time })); // Keep it concise
-                resolve(highImpactEvents);
-            }
-        });
-    });
-}
-
-// New API endpoint for active symbols
-app.get('/api/assets', async (req, res) => {
-    try {
-        const assets = await getActiveSymbols();
-        res.json(assets);
-    } catch (error) {
-        console.error('Error fetching assets from Deriv:', error);
-        res.status(500).json({ error: 'Failed to fetch assets from Deriv API.' });
-    }
-});
-
 
 // API endpoint to analyze market data
-app.post('/api/analyze', async (req, res) => {
-    const { asset, timeframe } = req.body;
-    if (!asset || !timeframe) {
-        return res.status(400).json({ error: 'Asset and timeframe are required.' });
+app.post('/api/analyze', async (req, res) => { //
+    const { asset, timeframe } = req.body; //
+
+    if (!asset || !timeframe) { //
+        return res.status(400).json({ error: 'Asset and timeframe are required.' }); //
     }
 
     try {
-        const candles = await getMarketData(asset, timeframe);
-        
-        // Ensure enough candles for indicators before calculating
-        if (candles.length < 50) { // SMA(50) needs 50 data points
-            return res.status(400).json({ error: `Not enough historical data for ${asset} on ${timeframe}. Please try a different asset or timeframe.` });
-        }
+        // Get market data with a rich set of calculated indicators
+        const marketDataWithIndicators = await getMarketData(asset, timeframe); //
 
-        const indicators = calculateIndicators(candles);
-        const upcomingEvents = await getEconomicEvents();
+        // Construct a more sophisticated prompt for the AI
+        const prompt = `You are a world-class algorithmic trading strategist. Your objective is to generate a precise trade recommendation for a ${asset} trade on the ${timeframe} timeframe.
 
-        const recentCandles = candles.slice(-50).map(c => ({ o: c.open, h: c.high, l: c.low, c: c.close, t: c.epoch }));
-        const recentIndicators = {
-            sma50: indicators.sma50.slice(-50),
-            rsi: indicators.rsi.slice(-50),
-            macd: indicators.macd.slice(-50),
-            bollingerBands: indicators.bollingerBands.slice(-50)
-        };
+Analyze the provided historical candle data, which includes values for RSI, MACD, Bollinger Bands, and 50/200 period EMAs. Your analysis should:
+1.  Identify the dominant trend using the EMAs.
+2.  Assess momentum using the MACD and RSI. Note any divergences or overbought/oversold conditions.
+3.  Evaluate volatility and potential breakout zones using the Bollinger Bands.
+4.  Identify key support and resistance levels from the price action.
 
-        const prompt = `You are an expert trading strategist AI. Your task is to generate a precise trade recommendation for ${asset} on the ${timeframe} timeframe based on the provided market data.
+Based on this comprehensive analysis, determine an optimal trade setup. Return ONLY a JSON object with the following five keys: "entryPoint", "stopLoss", "takeProfit", "justification", and "confidenceScore".
+- The "justification" should be a brief, one-sentence explanation of your reasoning.
+- The "confidenceScore" should be an integer from 1 to 10, where 10 is the highest confidence.
+- Do not include any other text, markdown formatting, or explanations.
 
-**Market Data:**
-1.  **Recent Candles:** ${JSON.stringify(recentCandles)}
-2.  **Technical Indicators:**
-    * **50-period SMA:** ${JSON.stringify(recentIndicators.sma50)}
-    * **14-period RSI:** ${JSON.stringify(recentIndicators.rsi)}
-    * **MACD (12,26,9):** ${JSON.stringify(recentIndicators.macd)}
-    * **Bollinger Bands (20,2):** ${JSON.stringify(recentIndicators.bollingerBands)}
-3.  **Upcoming High-Impact Events (Next 24h):** ${JSON.stringify(upcomingEvents)}
+Data (last 50 candles): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`; // Send only the most recent data to keep the prompt concise
 
-**Analysis & Instructions:**
-1.  **Trend:** Identify the primary trend using the 50-SMA.
-2.  **Momentum:** Evaluate RSI for overbought/oversold conditions and MACD for crossovers.
-3.  **Volatility:** Analyze price action relative to the Bollinger Bands (e.g., breakouts, squeezes).
-4.  **Risk:** Assess if upcoming economic events pose a significant risk to the trade.
-5.  **Synthesize:** Based on the confluence of these factors, determine an optimal trade setup.
+        const apiKey = process.env.GEMINI_API_KEY; //
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`; //
 
-**Output Format:**
-Return ONLY a single, minified JSON object with no markdown. The JSON object must have these four keys: "entryPoint", "stopLoss", "takeProfit", and "rationale". The rationale must be a concise, one-sentence explanation for the trade.`;
-
-        const apiKey = process.env.GEMINI_API_KEY;
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`; // Using gemini-2.5-flash as per your logs
-
-        const aiResponse = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        const aiResponse = await fetch(apiUrl, { //
+            method: 'POST', //
+            headers: { 'Content-Type': 'application/json' }, //
+            body: JSON.stringify({ //
+                contents: [{ parts: [{ text: prompt }] }] //
+            })
         });
 
-        if (!aiResponse.ok) {
-            const errorBody = await aiResponse.text();
-            throw new Error(`Gemini API request failed with status ${aiResponse.status}: ${errorBody}`);
+        if (!aiResponse.ok) { //
+            const errorBody = await aiResponse.text(); //
+            throw new Error(`Gemini API request failed with status ${aiResponse.status}: ${errorBody}`); //
         }
 
-        const aiResult = await aiResponse.json();
+        const aiResult = await aiResponse.json(); //
 
-        // *** DEBUGGING LOGS ***
-        console.log('Full AI Result:', JSON.stringify(aiResult, null, 2));
-
-
-        // *** ROBUST VALIDATION FIX ***
-        if (
-            !aiResult ||
-            !aiResult.candidates ||
-            aiResult.candidates.length === 0 || // Check if candidates array is empty
-            !aiResult.candidates[0].content ||
-            !aiResult.candidates[0].content.parts ||
-            aiResult.candidates[0].content.parts.length === 0 || // Check if parts array is empty
-            typeof aiResult.candidates[0].content.parts[0].text !== 'string' || // Check if text is a string
-            aiResult.candidates[0].content.parts[0].text.trim() === '' // Check if text is empty or just whitespace
-        ) {
-             throw new Error('Invalid or empty response structure from Gemini API. Check console for full AI result.');
+        if (!aiResult.candidates || !aiResult.candidates[0] || !aiResult.candidates[0].content || !aiResult.candidates[0].content.parts || !aiResult.candidates[0].content.parts[0] || !aiResult.candidates[0].content.parts[0].text) { //
+            throw new Error('Invalid response structure from Gemini API.'); //
         }
 
-        const responseText = aiResult.candidates[0].content.parts[0].text;
+        const responseText = aiResult.candidates[0].content.parts[0].text; //
 
-        // *** DEBUGGING LOGS ***
-        console.log('Extracted Response Text from AI:', responseText);
+        const jsonStartIndex = responseText.indexOf('{'); //
+        const jsonEndIndex = responseText.lastIndexOf('}'); //
 
-
-        // Extract JSON string from AI response, robustly handling potential markdown
-        const jsonStartIndex = responseText.indexOf('{');
-        const jsonEndIndex = responseText.lastIndexOf('}');
-
-        if (jsonStartIndex === -1 || jsonEndIndex === -1) {
-            throw new Error('Could not find a valid JSON object in the AI response text. Check console for AI text.');
+        if (jsonStartIndex === -1 || jsonEndIndex === -1) { //
+            console.error("Could not find JSON object in response:", responseText); //
+            throw new Error('Could not find a valid JSON object in the AI response.'); //
         }
 
-        const jsonString = responseText.substring(jsonStartIndex, jsonEndIndex + 1);
+        const jsonString = responseText.substring(jsonStartIndex, jsonEndIndex + 1); //
 
-        const analysis = JSON.parse(jsonString);
+        try {
+            const analysis = JSON.parse(jsonString); //
+            // Combine AI analysis with market data for the frontend chart
+            res.json({ analysis, marketData: marketDataWithIndicators }); //
+        } catch (e) { //
+            console.error("Final attempt to parse JSON failed. String was:", jsonString); //
+            throw new Error('Could not parse the JSON analysis from the AI response.'); //
+        }
 
-        // Send back both the AI analysis and the data needed for charting
-        res.json({
-            analysis,
-            marketData: {
-                candles: candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close })),
-                indicators: {
-                    sma50: indicators.sma50,
-                    bollingerBands: indicators.bollingerBands // Only including indicators displayed on chart
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error('Analysis error:', error.stack);
-        res.status(500).json({ error: error.message || 'An unknown error occurred during analysis.' });
+    } catch (error) { //
+        console.error('Analysis error:', error); //
+        res.status(500).json({ error: error.message }); //
     }
 });
 
-app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+app.listen(port, () => { //
+    console.log(`Server running at http://localhost:${port}`); //
 });
