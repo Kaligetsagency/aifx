@@ -6,6 +6,7 @@
     <title>Trading Analysis Tool</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
     <div class="container">
@@ -36,11 +37,12 @@
                 <button id="analyze-btn">Analyze</button>
             </div>
 
-            <div id="chart-container"></div>
-
             <div id="results-container" class="results-hidden">
                 <h2>Analysis Results</h2>
                 <div id="loader" class="loader-hidden"></div>
+
+                <div id="chart-container" style="height: 350px; margin-bottom: 20px;"></div>
+
                 <div id="results-content">
                     <div class="result-item">
                         <strong>Entry Point:</strong> <span id="entry-point"></span>
@@ -51,8 +53,11 @@
                     <div class="result-item">
                         <strong>Take Profit:</strong> <span id="take-profit"></span>
                     </div>
-                    <div class="result-item rationale">
-                        <strong>Rationale:</strong> <span id="rationale"></span>
+                    <div class="result-item">
+                        <strong>Confidence Score:</strong> <span id="confidence-score"></span>
+                    </div>
+                    <div class="result-item justification">
+                        <strong>Justification:</strong> <span id="justification"></span>
                     </div>
                 </div>
                 <div id="error-message" class="error-hidden"></div>
@@ -60,8 +65,6 @@
         </main>
     </div>
 
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
     <script src="script.js"></script>
-
 </body>
-                        </html>
+</html>
