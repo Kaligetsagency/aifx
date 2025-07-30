@@ -1,7 +1,7 @@
 {
   "name": "aifx",
-  "version": "2.0.0",
-  "description": "An advanced Node.js application for AI-powered trading analysis using Deriv, Gemini, and Finnhub APIs.",
+  "version": "1.0.0",
+  "description": "A Node.js application for trading analysis using Deriv and DeepSeek APIs.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -13,8 +13,6 @@
     "express": "^4.18.2",
     "ws": "^8.14.2",
     "node-fetch": "^2.7.0",
-    "technicalindicators": "^3.1.0",
-    "finnhub": "^1.2.18",
-    "@google/generative-ai": "^0.1.0"
+    "technicalindicators": "^3.1.0"
   }
 }
