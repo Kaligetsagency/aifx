@@ -14,10 +14,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const stopLossEl = document.getElementById('stop-loss');
     const takeProfitEl = document.getElementById('take-profit');
 
-    const derivSocket = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
-
-    // Function to show a custom message box instead of alert()
+    /**
+     * Shows a custom message box instead of a standard browser alert.
+     * @param {string} message The message to display.
+     * @param {string} type The type of message ('error', 'warning', 'info').
+     */
     function showMessageBox(message, type = 'error') {
+        // Remove any existing message boxes first
+        const existingBox = document.querySelector('.message-box');
+        if (existingBox) {
+            existingBox.remove();
+        }
+
         const messageBox = document.createElement('div');
         messageBox.className = `message-box ${type}`;
         messageBox.innerHTML = `
@@ -29,63 +37,88 @@ document.addEventListener('DOMContentLoaded', () => {
         messageBox.querySelector('.message-box-close').addEventListener('click', () => {
             messageBox.remove();
         });
-
-        // Automatically remove after a few seconds for non-critical messages
-        if (type !== 'error') {
-            setTimeout(() => {
-                messageBox.remove();
-            }, 3000);
-        }
     }
 
-    // 1. Populate asset dropdown on page load
-    derivSocket.onopen = function(e) {
-        derivSocket.send(JSON.stringify({
-            active_symbols: "brief",
-            product_type: "basic"
-        }));
-    };
+    /**
+     * Fetches the list of active symbols from the Deriv API and populates the asset dropdown.
+     */
+    function loadAssets() {
+        // Provide immediate feedback to the user that assets are loading
+        assetSelect.innerHTML = '<option value="">Loading assets...</option>';
+        assetSelect.disabled = true;
 
-    derivSocket.onmessage = function(msg) {
-        const data = JSON.parse(msg.data);
+        const derivSocket = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
 
-        if (data.error) {
-            console.error('Deriv API error:', data.error.message);
-            assetSelect.innerHTML = `<option value="">Error loading assets</option>`;
-            showMessageBox(`Failed to load assets: ${data.error.message}`, 'error');
-            return;
-        }
+        derivSocket.onopen = function(e) {
+            // Connection is open, now we can send our request for symbols
+            derivSocket.send(JSON.stringify({
+                active_symbols: "brief",
+                product_type: "basic"
+            }));
+        };
 
-        if (data.active_symbols) {
-            const activeSymbols = data.active_symbols;
-            assetSelect.innerHTML = ''; // Clear loading message
+        derivSocket.onmessage = function(msg) {
+            try {
+                const data = JSON.parse(msg.data);
 
-            // Filter for forex and indices for this example, you can expand this
-            const filteredSymbols = activeSymbols.filter(s =>
-                s.market === 'forex' || s.market === 'indices' || s.market === 'synthetic_index' // Added synthetic indices
-            );
+                // It's good practice to check for errors sent by the API
+                if (data.error) {
+                    console.error('Deriv API error:', data.error.message);
+                    showMessageBox(`Failed to load assets: ${data.error.message}`, 'error');
+                    assetSelect.innerHTML = '<option value="">Error loading assets</option>';
+                    derivSocket.close(); // Close connection on error
+                    return;
+                }
 
-            // Sort symbols alphabetically by display name
-            filteredSymbols.sort((a, b) => a.display_name.localeCompare(b.display_name));
+                // We are only interested in the message that contains our active symbols
+                if (data.msg_type === 'active_symbols') {
+                    const activeSymbols = data.active_symbols;
+                    
+                    // Filter for the markets we are interested in
+                    const filteredSymbols = activeSymbols.filter(s =>
+                        s.market === 'forex' || s.market === 'indices' || s.market === 'synthetic_index'
+                    );
 
+                    // Sort symbols alphabetically for better user experience
+                    filteredSymbols.sort((a, b) => a.display_name.localeCompare(b.display_name));
 
-            filteredSymbols.forEach(symbol => {
-                const option = document.createElement('option');
-                option.value = symbol.symbol;
-                option.textContent = symbol.display_name;
-                assetSelect.appendChild(option);
-            });
-            derivSocket.close(); // Close connection after getting symbols
-        }
-    };
+                    if (filteredSymbols.length > 0) {
+                        // Add a disabled, selected default option
+                        assetSelect.innerHTML = '<option value="" disabled selected>Select an Asset</option>';
+                        filteredSymbols.forEach(symbol => {
+                            const option = document.createElement('option');
+                            option.value = symbol.symbol;
+                            option.textContent = symbol.display_name;
+                            assetSelect.appendChild(option);
+                        });
+                    } else {
+                        assetSelect.innerHTML = '<option value="">No assets found</option>';
+                    }
 
-    derivSocket.onerror = function(err) {
-        console.error('WebSocket Error:', err);
-        assetSelect.innerHTML = `<option value="">Failed to connect</option>`;
-        showMessageBox('Failed to connect to Deriv WebSocket for assets.', 'error');
-    };
+                    assetSelect.disabled = false;
+                    derivSocket.close(); // We have what we need, close the connection
+                }
+                // Other message types from the websocket are ignored
+            } catch (error) {
+                console.error("Failed to parse WebSocket message:", error);
+                showMessageBox("An unexpected error occurred while loading assets.", 'error');
+                assetSelect.innerHTML = '<option value="">Error processing data</option>';
+                derivSocket.close();
+            }
+        };
 
-    // 2. Handle "Analyze" button click
+        derivSocket.onerror = function(err) {
+            console.error('WebSocket Error:', err);
+            assetSelect.innerHTML = `<option value="">Failed to connect</option>`;
+            showMessageBox('Failed to connect to Deriv for assets. Please check your internet connection and try again.', 'error');
+            assetSelect.disabled = false;
+        };
+    }
+
+    // Initial call to load assets when the page is ready
+    loadAssets();
+
+    // Handle "Analyze" button click - This logic remains the same
     analyzeBtn.addEventListener('click', async () => {
         const selectedAsset = assetSelect.value;
         const selectedTimeframe = timeframeSelect.value;
@@ -101,7 +134,6 @@ document.addEventListener('DOMContentLoaded', () => {
         loader.classList.remove('loader-hidden');
         errorMessage.classList.add('error-hidden');
         errorMessage.textContent = '';
-
 
         try {
             const response = await fetch('/api/analyze', {
@@ -121,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(result.error || `HTTP error! Status: ${response.status}`);
             }
 
-            // 3. Display results
+            // Display results
             entryPointEl.textContent = result.entryPoint ? parseFloat(result.entryPoint).toFixed(4) : 'N/A';
             stopLossEl.textContent = result.stopLoss ? parseFloat(result.stopLoss).toFixed(4) : 'N/A';
             takeProfitEl.textContent = result.takeProfit ? parseFloat(result.takeProfit).toFixed(4) : 'N/A';
@@ -139,3 +171,4 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+    
