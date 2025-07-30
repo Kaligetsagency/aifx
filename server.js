@@ -152,7 +152,7 @@ Based on this comprehensive analysis, determine an optimal trade setup. Return O
 Data (last 50 candles): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`;
 
         const apiKey = process.env.GEMINI_API_KEY;
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
         const aiResponse = await fetch(apiUrl, {
             method: 'POST',
@@ -199,16 +199,25 @@ Data (last 50 candles): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`;
         // --- End of new handling ---
 
         const aiText = candidate.content.parts[0].text;
-        const jsonStartIndex = aiText.indexOf('{');
-        const jsonEndIndex = aiText.lastIndexOf('}');
+        
+        // --- FIX START ---
+        // The original JSON parsing using indexOf and lastIndexOf was brittle.
+        // This new logic robustly extracts a JSON object, even if it's embedded
+        // in text or markdown code fences from the AI's response.
+        let jsonString = '';
+        
+        // Regex to find a JSON object optionally wrapped in markdown ```json ... ```
+        const jsonMatch = aiText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```|(\{[\s\S]*\})/);
 
-        if (jsonStartIndex === -1 || jsonEndIndex === -1) {
-            console.error("Could not find JSON object in AI response text:", aiText);
+        if (jsonMatch) {
+            // Prioritize the content from the markdown block if present, otherwise use the broader match.
+            jsonString = jsonMatch[1] || jsonMatch[2];
+        } else {
+            console.error("Could not find a valid JSON object in the AI response text:", aiText);
             throw new Error('Could not find a valid JSON object in the AI response.');
         }
-
-        const jsonString = aiText.substring(jsonStartIndex, jsonEndIndex + 1);
-
+        // --- FIX END ---
+        
         try {
             const analysis = JSON.parse(jsonString);
             res.json({ analysis, marketData: marketDataWithIndicators });
