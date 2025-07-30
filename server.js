@@ -5,6 +5,7 @@ const express = require('express');
 const WebSocket = require('ws');
 const dotenv = require('dotenv');
 const fetch = require('node-fetch');
+const ti = require('technicalindicators');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -28,45 +29,105 @@ function getTimeframeInSeconds(timeframe) {
     switch (unit) {
         case 'm': return value * 60;
         case 'h': return value * 3600;
-        case 'd': return value * 24 * 3600; // Added for '1D'
+        case 'd': return value * 24 * 3600;
         default: return 60; // Default to 1 minute
     }
 }
 
 /**
- * Calculates Simple Moving Average (SMA) for a given period.
- * This is a basic implementation. For production, consider a dedicated TA library.
- * @param {Array<Object>} candles - Array of candle objects with a 'close' property.
- * @param {number} period - The period for the SMA calculation.
- * @returns {Array<Object>} Candles with an added 'sma' property.
+ * Calculates a comprehensive set of technical indicators using the 'technicalindicators' library.
+ * @param {Array<Object>} candles - Array of candle objects with open, high, low, close, and volume properties.
+ * @returns {Array<Object>} Candles with added technical indicator properties.
  */
-function calculateSMA(candles, period) {
-    return candles.map((candle, index, arr) => {
-        if (index >= period - 1) {
-            const sum = arr.slice(index - period + 1, index + 1).reduce((acc, c) => acc + c.close, 0);
-            return { ...candle, sma: parseFloat((sum / period).toFixed(4)) }; // Format to 4 decimal places
-        }
-        return { ...candle, sma: null };
+function calculateAllIndicators(candles) {
+    // Prepare input for the technicalindicators library
+    const input = {
+        open: candles.map(c => c.open),
+        high: candles.map(c => c.high),
+        low: candles.map(c => c.low),
+        close: candles.map(c => c.close),
+        volume: candles.map(c => c.volume || 0), // Use volume if available, else 0
+        period: 14, // Common period for many indicators like RSI, Stochastic
+    };
+
+    // Calculate various indicators
+    const sma20 = ti.SMA.calculate({ period: 20, values: input.close });
+    const ema50 = ti.EMA.calculate({ period: 50, values: input.close });
+    const rsi = ti.RSI.calculate({ period: 14, values: input.close });
+    const macd = ti.MACD.calculate({
+        values: input.close,
+        fastPeriod: 12,
+        slowPeriod: 26,
+        signalPeriod: 9,
+        SimpleMAOscillator: false,
+        SimpleMASignal: false
     });
+    const bollingerBands = ti.BollingerBands.calculate({
+        period: 20,
+        values: input.close,
+        stdDev: 2
+    });
+    const stochastic = ti.Stochastic.calculate({
+        high: input.high,
+        low: input.low,
+        close: input.close,
+        period: 14,
+        signalPeriod: 3
+    });
+     const adx = ti.ADX.calculate({
+        high: input.high,
+        low: input.low,
+        close: input.close,
+        period: 14
+    });
+
+
+    // Map indicators back to the candles array
+    // We start from the end and work backwards to ensure we have enough data for calculations
+    const candlesWithIndicators = candles.map((candle, index) => {
+        const newCandle = { ...candle };
+        // Find the corresponding indicator value for the current candle index
+        // This requires careful index management as indicators have fewer data points than candles
+        const smaIndex = index - (candles.length - sma20.length);
+        const emaIndex = index - (candles.length - ema50.length);
+        const rsiIndex = index - (candles.length - rsi.length);
+        const macdIndex = index - (candles.length - macd.length);
+        const bbIndex = index - (candles.length - bollingerBands.length);
+        const stochIndex = index - (candles.length - stochastic.length);
+        const adxIndex = index - (candles.length - adx.length);
+
+
+        if (smaIndex >= 0) newCandle.sma20 = parseFloat(sma20[smaIndex].toFixed(4));
+        if (emaIndex >= 0) newCandle.ema50 = parseFloat(ema50[emaIndex].toFixed(4));
+        if (rsiIndex >= 0) newCandle.rsi = parseFloat(rsi[rsiIndex].toFixed(2));
+        if (macdIndex >= 0) newCandle.macd = macd[macdIndex];
+        if (bbIndex >= 0) newCandle.bollingerBands = bollingerBands[bbIndex];
+        if (stochIndex >= 0) newCandle.stochastic = stochastic[stochIndex];
+        if (adxIndex >= 0) newCandle.adx = adx[adxIndex];
+
+
+        return newCandle;
+    });
+
+    return candlesWithIndicators;
 }
+
 
 /**
  * Deriv API communication via WebSocket to fetch historical candle data.
- * Increased count for more historical data.
- * @param {string} asset - The financial asset to fetch data for (e.g., 'R_100').
- * @param {string} timeframe - The timeframe for the data (e.g., 'M1', 'H1').
- * @returns {Promise<any>} A promise that resolves with the fetched candles data.
+ * @param {string} asset - The financial asset to fetch data for.
+ * @param {string} timeframe - The timeframe for the data.
+ * @returns {Promise<any>} A promise that resolves with the fetched candles data, including indicators.
  */
 function getMarketData(asset, timeframe) {
     return new Promise((resolve, reject) => {
         const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
 
         ws.onopen = () => {
-            // Request more historical data for better analysis
             ws.send(JSON.stringify({
                 "ticks_history": asset,
                 "end": "latest",
-                "count": 5000, // Increased from 500 to 5000 for more data
+                "count": 5000,
                 "style": "candles",
                 "granularity": getTimeframeInSeconds(timeframe)
             }));
@@ -79,9 +140,9 @@ function getMarketData(asset, timeframe) {
                 ws.close();
             } else if (data.msg_type === 'candles') {
                 if (data.candles && data.candles.length > 0) {
-                    // Add technical indicators here before resolving
-                    const candlesWithSMA = calculateSMA(data.candles, 20); // Example: 20-period SMA
-                    resolve(candlesWithSMA);
+                    // Calculate all technical indicators
+                    const candlesWithIndicators = calculateAllIndicators(data.candles);
+                    resolve(candlesWithIndicators);
                 } else {
                     reject(new Error(`No candle data returned for asset ${asset} and timeframe.`));
                 }
@@ -105,20 +166,34 @@ app.post('/api/analyze', async (req, res) => {
     }
 
     try {
-        // Get market data with calculated indicators
         const marketDataWithIndicators = await getMarketData(asset, timeframe);
 
-        // Construct a more sophisticated prompt for the AI
-        const prompt = `You are a world-class algorithmic trading strategist with expertise in multi-timeframe technical analysis, pattern recognition, and risk management. Your objective is to generate highly precise and profitable trade recommendations for a ${asset} trade on the ${timeframe} timeframe, considering the provided historical candle data, including the Simple Moving Average (SMA), and recent volume action.
+        // A more sophisticated prompt for the AI, now including all indicators
+        const prompt = `You are a world-class algorithmic trading strategist. Your objective is to generate a precise and profitable trade recommendation for a ${asset} trade on the ${timeframe} timeframe.
 
-Analyze the data by first identifying dominant trends (short-term, medium-term), then key support/resistance levels. Subsequently, assess indicator confluence (e.g., how price interacts with SMA), and finally, detect any significant candlestick or chart patterns.
+Analyze the provided historical candle data, which includes the following technical indicators:
+- 20-period Simple Moving Average (sma20)
+- 50-period Exponential Moving Average (ema50)
+- Relative Strength Index (rsi)
+- Moving Average Convergence Divergence (macd)
+- Bollinger Bands (bollingerBands)
+- Stochastic Oscillator (stochastic)
+- Average Directional Index (adx)
 
-Based on this detailed analysis, determine an optimal trade setup. Return ONLY a JSON object with the following three keys, ensuring the proposed stop-loss provides a clear invalidation point and the take-profit targets a minimum 1.5:1 reward-to-risk ratio. Do not include any other text, markdown formatting, or explanations.
+Your analysis should:
+1. Identify the dominant trend using moving averages (SMA, EMA) and the ADX.
+2. Assess momentum and overbought/oversold conditions using RSI and Stochastic oscillators.
+3. Use MACD for trend confirmation and potential reversal signals.
+4. Evaluate volatility and potential price breakouts using Bollinger Bands.
+5. Synthesize these indicators to find a high-probability trade setup.
 
-Data: ${JSON.stringify(marketDataWithIndicators)}`;
+Based on this comprehensive analysis, determine an optimal trade setup. Return ONLY a JSON object with the following three keys: "entryPoint", "stopLoss", "takeProfit". Ensure the stop-loss provides a clear invalidation point and the take-profit targets a minimum 1.5:1 reward-to-risk ratio. Do not include any other text, markdown formatting, or explanations.
+
+Data (last 50 candles for brevity): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`;
+
 
         const apiKey = process.env.GEMINI_API_KEY;
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
 
         const aiResponse = await fetch(apiUrl, {
             method: 'POST',
@@ -140,10 +215,6 @@ Data: ${JSON.stringify(marketDataWithIndicators)}`;
         }
 
         const responseText = aiResult.candidates[0].content.parts[0].text;
-
-        // Robust JSON parsing to handle imperfect AI responses.
-        // This logic finds the first '{' and the last '}' in the response text,
-        // extracts the content between them, and then parses it.
         const jsonStartIndex = responseText.indexOf('{');
         const jsonEndIndex = responseText.lastIndexOf('}');
 
@@ -171,3 +242,4 @@ Data: ${JSON.stringify(marketDataWithIndicators)}`;
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
+    
