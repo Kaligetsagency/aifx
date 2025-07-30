@@ -7,29 +7,29 @@ const dotenv = require('dotenv');
 const fetch = require('node-fetch');
 const ta = require('technicalindicators');
 
-[cite_start]// Load environment variables from .env file [cite: 1]
-dotenv.config(); [cite_start]// [cite: 1]
+// Load environment variables from .env file
+dotenv.config();
 
 const app = express();
 const port = 3000;
 
 // Middleware to parse JSON bodies
-app.use(express.json()); //
+app.use(express.json());
 // Serve static files from the 'public' directory
-app.use(express.static('public')); // This line should be present to serve your html, css, and js files.
+app.use(express.static('public'));
 
 /**
  * Converts human-readable timeframe to seconds for the Deriv API.
  * @param {string} timeframe - The timeframe string (e.g., '1m', '5m', '1H').
  * @returns {number} The timeframe in seconds.
  */
-function getTimeframeInSeconds(timeframe) { //
-    const unit = timeframe.slice(-1).toLowerCase(); //
-    const value = parseInt(timeframe.slice(0, -1)); //
-    switch (unit) { //
-        case 'm': return value * 60; //
-        case 'h': return value * 3600; //
-        case 'd': return value * 24 * 3600; //
+function getTimeframeInSeconds(timeframe) {
+    const unit = timeframe.slice(-1).toLowerCase();
+    const value = parseInt(timeframe.slice(0, -1));
+    switch (unit) {
+        case 'm': return value * 60;
+        case 'h': return value * 3600;
+        case 'd': return value * 24 * 3600;
         default: return 60; // Default to 1 minute
     }
 }
@@ -40,34 +40,27 @@ function getTimeframeInSeconds(timeframe) { //
  * @returns {Array<Object>} Candles with added technical indicator properties.
  */
 function calculateTechnicalIndicators(candles) {
-    // The library requires separate arrays for each component (open, high, low, close, volume)
     const input = {
         open: candles.map(c => c.open),
         high: candles.map(c => c.high),
         low: candles.map(c => c.low),
         close: candles.map(c => c.close),
         volume: candles.map(c => c.volume),
-        period: 0 // placeholder
+        period: 0
     };
 
-    // Calculate Indicators
     const rsi = ta.rsi({ values: input.close, period: 14 });
     const macd = ta.macd({ values: input.close, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 });
     const bollingerBands = ta.bollingerbands({ values: input.close, period: 20, stdDev: 2 });
     const ema50 = ta.ema({ values: input.close, period: 50 });
     const ema200 = ta.ema({ values: input.close, period: 200 });
 
-
-    // Combine indicators with the original candle data
     return candles.map((candle, index) => {
-        // Find the corresponding indicator value. Since indicators have a lead-in period,
-        // we need to offset the index to align the data correctly.
         const rsiIndex = index - 14;
-        const macdIndex = index - 25; // MACD takes 26 periods to warm up
+        const macdIndex = index - 25;
         const bbIndex = index - 19;
         const ema50Index = index - 49;
         const ema200Index = index - 199;
-
 
         return {
             ...candle,
@@ -95,57 +88,54 @@ function calculateTechnicalIndicators(candles) {
  * @param {string} timeframe - The timeframe for the data (e.g., 'M1', 'H1').
  * @returns {Promise<any>} A promise that resolves with the fetched candles data.
  */
-function getMarketData(asset, timeframe) { //
-    return new Promise((resolve, reject) => { //
-        const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089'); //
+function getMarketData(asset, timeframe) {
+    return new Promise((resolve, reject) => {
+        const ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
 
-        ws.onopen = () => { //
-            ws.send(JSON.stringify({ //
-                "ticks_history": asset, //
-                "end": "latest", //
-                "count": 500, // Reduced for faster processing, still ample for indicators
-                "style": "candles", //
-                "granularity": getTimeframeInSeconds(timeframe) //
+        ws.onopen = () => {
+            ws.send(JSON.stringify({
+                "ticks_history": asset,
+                "end": "latest",
+                "count": 500,
+                "style": "candles",
+                "granularity": getTimeframeInSeconds(timeframe)
             }));
         };
 
-        ws.onmessage = (msg) => { //
-            const data = JSON.parse(msg.data); //
-            if (data.error) { //
-                reject(new Error(data.error.message)); //
-                ws.close(); //
-            } else if (data.msg_type === 'candles') { //
-                if (data.candles && data.candles.length > 0) { //
-                    // Add technical indicators here before resolving
-                    const candlesWithIndicators = calculateTechnicalIndicators(data.candles); //
-                    resolve(candlesWithIndicators); //
-                } else { //
-                    reject(new Error(`No candle data returned for asset ${asset} and timeframe.`)); //
+        ws.onmessage = (msg) => {
+            const data = JSON.parse(msg.data);
+            if (data.error) {
+                reject(new Error(data.error.message));
+                ws.close();
+            } else if (data.msg_type === 'candles') {
+                if (data.candles && data.candles.length > 0) {
+                    const candlesWithIndicators = calculateTechnicalIndicators(data.candles);
+                    resolve(candlesWithIndicators);
+                } else {
+                    reject(new Error(`No candle data returned for asset ${asset} and timeframe.`));
                 }
-                ws.close(); //
+                ws.close();
             }
         };
 
-        ws.onclose = () => {}; //
-        ws.onerror = (err) => { //
-            reject(new Error('WebSocket error: ' + err.message)); //
+        ws.onclose = () => {};
+        ws.onerror = (err) => {
+            reject(new Error('WebSocket error: ' + err.message));
         };
     });
 }
 
 // API endpoint to analyze market data
-app.post('/api/analyze', async (req, res) => { //
-    const { asset, timeframe } = req.body; //
+app.post('/api/analyze', async (req, res) => {
+    const { asset, timeframe } = req.body;
 
-    if (!asset || !timeframe) { //
-        return res.status(400).json({ error: 'Asset and timeframe are required.' }); //
+    if (!asset || !timeframe) {
+        return res.status(400).json({ error: 'Asset and timeframe are required.' });
     }
 
     try {
-        // Get market data with a rich set of calculated indicators
-        const marketDataWithIndicators = await getMarketData(asset, timeframe); //
+        const marketDataWithIndicators = await getMarketData(asset, timeframe);
 
-        // Construct a more sophisticated prompt for the AI
         const prompt = `You are a world-class algorithmic trading strategist. Your objective is to generate a precise trade recommendation for a ${asset} trade on the ${timeframe} timeframe.
 
 Analyze the provided historical candle data, which includes values for RSI, MACD, Bollinger Bands, and 50/200 period EMAs. Your analysis should:
@@ -159,57 +149,55 @@ Based on this comprehensive analysis, determine an optimal trade setup. Return O
 - The "confidenceScore" should be an integer from 1 to 10, where 10 is the highest confidence.
 - Do not include any other text, markdown formatting, or explanations.
 
-Data (last 50 candles): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`; // Send only the most recent data to keep the prompt concise
+Data (last 50 candles): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`;
 
-        const apiKey = process.env.GEMINI_API_KEY; //
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`; //
+        const apiKey = process.env.GEMINI_API_KEY;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-        const aiResponse = await fetch(apiUrl, { //
-            method: 'POST', //
-            headers: { 'Content-Type': 'application/json' }, //
-            body: JSON.stringify({ //
-                contents: [{ parts: [{ text: prompt }] }] //
+        const aiResponse = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
             })
         });
 
-        if (!aiResponse.ok) { //
-            const errorBody = await aiResponse.text(); //
-            throw new Error(`Gemini API request failed with status ${aiResponse.status}: ${errorBody}`); //
+        if (!aiResponse.ok) {
+            const errorBody = await aiResponse.text();
+            throw new Error(`Gemini API request failed with status ${aiResponse.status}: ${errorBody}`);
         }
 
-        const aiResult = await aiResponse.json(); //
+        const aiResult = await aiResponse.json();
 
-        if (!aiResult.candidates || !aiResult.candidates[0] || !aiResult.candidates[0].content || !aiResult.candidates[0].content.parts || !aiResult.candidates[0].content.parts[0] || !aiResult.candidates[0].content.parts[0].text) { //
-            throw new Error('Invalid response structure from Gemini API.'); //
+        if (!aiResult.candidates || !aiResult.candidates[0] || !aiResult.candidates[0].content || !aiResult.candidates[0].content.parts || !aiResult.candidates[0].content.parts[0] || !aiResult.candidates[0].content.parts[0].text) {
+            throw new Error('Invalid response structure from Gemini API.');
         }
 
-        const responseText = aiResult.candidates[0].content.parts[0].text; //
+        const responseText = aiResult.candidates[0].content.parts[0].text;
+        const jsonStartIndex = responseText.indexOf('{');
+        const jsonEndIndex = responseText.lastIndexOf('}');
 
-        const jsonStartIndex = responseText.indexOf('{'); //
-        const jsonEndIndex = responseText.lastIndexOf('}'); //
-
-        if (jsonStartIndex === -1 || jsonEndIndex === -1) { //
-            console.error("Could not find JSON object in response:", responseText); //
-            throw new Error('Could not find a valid JSON object in the AI response.'); //
+        if (jsonStartIndex === -1 || jsonEndIndex === -1) {
+            console.error("Could not find JSON object in response:", responseText);
+            throw new Error('Could not find a valid JSON object in the AI response.');
         }
 
-        const jsonString = responseText.substring(jsonStartIndex, jsonEndIndex + 1); //
+        const jsonString = responseText.substring(jsonStartIndex, jsonEndIndex + 1);
 
         try {
-            const analysis = JSON.parse(jsonString); //
-            // Combine AI analysis with market data for the frontend chart
-            res.json({ analysis, marketData: marketDataWithIndicators }); //
-        } catch (e) { //
-            console.error("Final attempt to parse JSON failed. String was:", jsonString); //
-            throw new Error('Could not parse the JSON analysis from the AI response.'); //
+            const analysis = JSON.parse(jsonString);
+            res.json({ analysis, marketData: marketDataWithIndicators });
+        } catch (e) {
+            console.error("Final attempt to parse JSON failed. String was:", jsonString);
+            throw new Error('Could not parse the JSON analysis from the AI response.');
         }
 
-    } catch (error) { //
-        console.error('Analysis error:', error); //
-        res.status(500).json({ error: error.message }); //
+    } catch (error) {
+        console.error('Analysis error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
-app.listen(port, () => { //
-    console.log(`Server running at http://localhost:${3000}`); //
+app.listen(port, () => {
+    console.log(`Server running at http://localhost:${port}`);
 });
