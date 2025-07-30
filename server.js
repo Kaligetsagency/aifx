@@ -193,7 +193,7 @@ Data (last 50 candles for brevity): ${JSON.stringify(marketDataWithIndicators.sl
 
 
         const apiKey = process.env.GEMINI_API_KEY;
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
         const aiResponse = await fetch(apiUrl, {
             method: 'POST',
