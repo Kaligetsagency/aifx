@@ -211,5 +211,5 @@ Data (last 50 candles): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`;
 });
 
 app.listen(port, () => { //
-    console.log(`Server running at http://localhost:${port}`); //
+    console.log(`Server running at http://localhost:${3000}`); //
 });
