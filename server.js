@@ -127,7 +127,7 @@ function getMarketData(asset, timeframe) {
             ws.send(JSON.stringify({
                 "ticks_history": asset,
                 "end": "latest",
-                "count": 5000,
+                "count": 15000,
                 "style": "candles",
                 "granularity": getTimeframeInSeconds(timeframe)
             }));
