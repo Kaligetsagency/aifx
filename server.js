@@ -40,17 +40,15 @@ function getTimeframeInSeconds(timeframe) {
  * @returns {Array<Object>} Candles with added technical indicator properties.
  */
 function calculateAllIndicators(candles) {
-    // Prepare input for the technicalindicators library
     const input = {
         open: candles.map(c => c.open),
         high: candles.map(c => c.high),
         low: candles.map(c => c.low),
         close: candles.map(c => c.close),
-        volume: candles.map(c => c.volume || 0), // Use volume if available, else 0
-        period: 14, // Common period for many indicators like RSI, Stochastic
+        volume: candles.map(c => c.volume || 0),
+        period: 14,
     };
 
-    // Calculate various indicators
     const sma20 = ti.SMA.calculate({ period: 20, values: input.close });
     const ema50 = ti.EMA.calculate({ period: 50, values: input.close });
     const rsi = ti.RSI.calculate({ period: 14, values: input.close });
@@ -74,20 +72,15 @@ function calculateAllIndicators(candles) {
         period: 14,
         signalPeriod: 3
     });
-     const adx = ti.ADX.calculate({
+    const adx = ti.ADX.calculate({
         high: input.high,
         low: input.low,
         close: input.close,
         period: 14
     });
 
-
-    // Map indicators back to the candles array
-    // We start from the end and work backwards to ensure we have enough data for calculations
     const candlesWithIndicators = candles.map((candle, index) => {
         const newCandle = { ...candle };
-        // Find the corresponding indicator value for the current candle index
-        // This requires careful index management as indicators have fewer data points than candles
         const smaIndex = index - (candles.length - sma20.length);
         const emaIndex = index - (candles.length - ema50.length);
         const rsiIndex = index - (candles.length - rsi.length);
@@ -95,7 +88,6 @@ function calculateAllIndicators(candles) {
         const bbIndex = index - (candles.length - bollingerBands.length);
         const stochIndex = index - (candles.length - stochastic.length);
         const adxIndex = index - (candles.length - adx.length);
-
 
         if (smaIndex >= 0) newCandle.sma20 = parseFloat(sma20[smaIndex].toFixed(4));
         if (emaIndex >= 0) newCandle.ema50 = parseFloat(ema50[emaIndex].toFixed(4));
@@ -105,13 +97,11 @@ function calculateAllIndicators(candles) {
         if (stochIndex >= 0) newCandle.stochastic = stochastic[stochIndex];
         if (adxIndex >= 0) newCandle.adx = adx[adxIndex];
 
-
         return newCandle;
     });
 
     return candlesWithIndicators;
 }
-
 
 /**
  * Deriv API communication via WebSocket to fetch historical candle data.
@@ -127,7 +117,7 @@ function getMarketData(asset, timeframe) {
             ws.send(JSON.stringify({
                 "ticks_history": asset,
                 "end": "latest",
-                "count": 15000,
+                "count": 35000,
                 "style": "candles",
                 "granularity": getTimeframeInSeconds(timeframe)
             }));
@@ -140,7 +130,6 @@ function getMarketData(asset, timeframe) {
                 ws.close();
             } else if (data.msg_type === 'candles') {
                 if (data.candles && data.candles.length > 0) {
-                    // Calculate all technical indicators
                     const candlesWithIndicators = calculateAllIndicators(data.candles);
                     resolve(candlesWithIndicators);
                 } else {
@@ -168,29 +157,23 @@ app.post('/api/analyze', async (req, res) => {
     try {
         const marketDataWithIndicators = await getMarketData(asset, timeframe);
 
-        // A more sophisticated prompt for the AI, now including all indicators
-        const prompt = `You are a world-class algorithmic trading strategist. Your objective is to generate a precise and profitable trade recommendation for a ${asset} trade on the ${timeframe} timeframe.
+        // This new prompt guides the AI to use a professional trading strategy.
+        const prompt = `You are an expert algorithmic trading strategist with deep knowledge of price action, market structure, and technical analysis. Your task is to identify the single best, highest-probability trade setup for ${asset} on the ${timeframe} timeframe based on the provided data.
 
-Analyze the provided historical candle data, which includes the following technical indicators:
-- 20-period Simple Moving Average (sma20)
-- 50-period Exponential Moving Average (ema50)
-- Relative Strength Index (rsi)
-- Moving Average Convergence Divergence (macd)
-- Bollinger Bands (bollingerBands)
-- Stochastic Oscillator (stochastic)
-- Average Directional Index (adx)
+Follow this exact strategic process:
+1.  **Market Structure Analysis**: First, determine the overall market trend. Is it bullish (higher highs and higher lows), bearish (lower highs and lower lows), or ranging? Use the 50 EMA as a dynamic guide for the trend.
+2.  **Identify Key Zones**: Pinpoint the most significant, recent support and resistance levels based on price action (previous swing highs and lows). These are areas where price is likely to react.
+3.  **Find a High-Probability Setup**: Look for a confluence of events. Do not trade based on a single indicator. A high-probability setup occurs when multiple factors align. For example:
+    * **Bullish Setup**: Price pulls back to a key support level which aligns with the 50 EMA, and the RSI is in or near oversold territory. The entry trigger is a strong bullish candlestick pattern (e.g., an engulfing candle, hammer, or morning star) forming at this zone.
+    * **Bearish Setup**: Price rallies to a key resistance level which aligns with the 50 EMA, and the RSI is in or near overbought territory. The entry trigger is a strong bearish candlestick pattern (e.g., a bearish engulfing, shooting star, or evening star) at this zone.
+4.  **Determine Optimal Levels**:
+    * **entryPoint**: The entry should be at the close of the trigger candle or a slight improvement on it.
+    * **stopLoss**: Place the stop-loss at a logical invalidation point. For a bullish trade, it should be just below the low of the trigger candle or the key support zone. For a bearish trade, just above the high of the trigger candle or the key resistance zone.
+    * **takeProfit**: The take-profit should target the next logical area of resistance (for a long trade) or support (for a short trade), ensuring a minimum reward-to-risk ratio of 1.5:1.
 
-Your analysis should:
-1. Identify the dominant trend using moving averages (SMA, EMA) and the ADX.
-2. Assess momentum and overbought/oversold conditions using RSI and Stochastic oscillators.
-3. Use MACD for trend confirmation and potential reversal signals.
-4. Evaluate volatility and potential price breakouts using Bollinger Bands.
-5. Synthesize these indicators to find a high-probability trade setup.
+Based on this complete strategy, analyze the data and return ONLY a JSON object with the three keys: "entryPoint", "stopLoss", and "takeProfit". If no high-probability setup is identified, return null values for all keys. Do not include any other text, markdown, or explanations.
 
-Based on this comprehensive analysis, determine an optimal trade setup. Return ONLY a JSON object with the following three keys: "entryPoint", "stopLoss", "takeProfit". Ensure the stop-loss provides a clear invalidation point and the take-profit targets a minimum 1.5:1 reward-to-risk ratio. Do not include any other text, markdown formatting, or explanations.
-
-Data (last 50 candles for brevity): ${JSON.stringify(marketDataWithIndicators.slice(-50))}`;
-
+Data (last 100 candles for context): ${JSON.stringify(marketDataWithIndicators.slice(-100))}`;
 
         const apiKey = process.env.GEMINI_API_KEY;
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
@@ -241,5 +224,4 @@ Data (last 50 candles for brevity): ${JSON.stringify(marketDataWithIndicators.sl
 
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
-});
-    
+});       
