@@ -173,7 +173,7 @@ Follow this exact strategic process:
 
 Based on this complete strategy, analyze the data and return ONLY a JSON object with the three keys: "entryPoint", "stopLoss", and "takeProfit". If no high-probability setup is identified, return null values for all keys. Do not include any other text, markdown, or explanations.
 
-Data (last 1000 candles for context): ${JSON.stringify(marketDataWithIndicators.slice(-1000))}`;
+Data (last 100 candles for context): ${JSON.stringify(marketDataWithIndicators.slice(-100))}`;
 
         const apiKey = process.env.GEMINI_API_KEY;
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
