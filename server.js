@@ -51,7 +51,7 @@ function calculateAllIndicators(candles) {
 
     const sma20 = ti.SMA.calculate({ period: 20, values: input.close });
     const ema50 = ti.EMA.calculate({ period: 50, values: input.close });
-    const rsi = ti.RSI.calculate({ period: 2, values: input.previousindicatorsdata});
+    const rsi = ti.RSI.calculate({ period: 2, values: input.previousindicatorsdata });
     const macd = ti.MACD.calculate({
         values: input.close,
         fastPeriod: 12,
